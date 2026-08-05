@@ -1,28 +1,47 @@
 # game/
 
-This folder is the seam between the improvement-loop tooling and the actual
-Kaggriculture competition environment.
+Wraps the official Kaggriculture environment, published by Kaggle as part of
+the open-source `kaggle_environments` framework
+(https://github.com/Kaggle/kaggle-environments). This is the real
+competition environment -- not a placeholder.
 
-- `interface.py` defines the `GameEnv` protocol every environment
-  implementation must satisfy, plus `load_env()` / `play_match()` helpers
-  used by `evaluation/run_matches.py`.
-- `stub_env.py` is a placeholder (`RandomStubEnv`) that produces
-  correctly-shaped replay records using simple random economics, so the rest
-  of the pipeline can be built, run, and tested before the official rules
-  are vendored here.
+- `kaggriculture_env.py` -- `play_match(agent_a, agent_b, seed, configuration)`
+  runs one episode via `kaggle_environments.make("kaggriculture", ...)` and
+  returns the full replay as a JSON-serializable dict, plus small helpers
+  (`final_money`, `final_status`, `crashed`).
+- `tables.py` -- crop/animal cost constants (imported straight from the
+  installed `kaggle_environments` package so they can't drift) plus the
+  hire-cost and land-cost formulas, used by `analysis/` to attribute money
+  deltas to spending categories.
 
-## Plugging in the real environment
+## Setup
 
-1. Add the official Kaggriculture simulator (or a thin wrapper around the
-   `kaggle_environments`-style API) as a new module in this folder, e.g.
-   `game/kaggriculture_env.py`.
-2. Implement the `GameEnv` protocol from `interface.py`:
-   `reset(seed)`, `step(action)`, `invalid_action_count`, `crashed`.
-   Keep the `step_record` fields (`day`, `bank`, `revenue_by_item`, `costs`,
-   `events`, `idle`, `dead_crops`, `escaped_animals`, `missed_harvest`)
-   because `analysis/replay_parser.py` depends on them.
-3. Point evaluation calls at it, e.g.
-   `run_matches(..., env_path="game.kaggriculture_env:KaggricultureEnv")`.
-4. Do **not** change the official observation/action schema to make step 2
-   easier -- adapt the wrapper instead. The acceptance gate and strategist
-   prompt both explicitly forbid touching the official API.
+```bash
+pip install -r requirements.txt   # installs kaggle-environments
+```
+
+## Rules reference
+
+Full game rules (crop/animal tables, market price function, turn processing
+order, observation/action schema) live in the installed package:
+
+```
+<site-packages>/kaggle_environments/envs/kaggriculture/README.md
+<site-packages>/kaggle_environments/envs/kaggriculture/AGENTS.md
+```
+
+Or read them online in the `kaggle_environments` GitHub repo. Three built-in
+opponents are available by name for quick testing/evaluation: `"pass"`,
+`"random"`, and `"starter"` (a deterministic carrot-loop baseline -- also
+what `submissions/baseline/main.py` in this repo is a copy of).
+
+## Agent contract (do not change)
+
+```python
+def agent(observation: dict) -> dict:
+    ...  # returns {"farmer": [op, ...], "hands": [[op, ...], ...], "market": [[op, ...], ...]}
+```
+
+This is the official Kaggle submission signature. `evaluation/acceptance_gate.py`
+and `prompts/strategist.md` both forbid changing it as part of an
+"improvement" -- see `submissions/README.md`.

@@ -1,5 +1,5 @@
-# Core loop (analysis/, evaluation/, game/stub_env.py) has no third-party
-# dependencies beyond the standard library.
+# Required: the real Kaggriculture game environment.
+kaggle-environments>=1.32
 
 # Optional: enables agents/llm_client.py's unattended API mode.
 # Without this installed (and ANTHROPIC_API_KEY set), the loop runs in

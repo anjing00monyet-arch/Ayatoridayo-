@@ -19,7 +19,6 @@ the results.
 from __future__ import annotations
 
 import csv
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -79,7 +78,7 @@ def save_as_new_best(candidate_src: str) -> None:
 def improvement_loop(games: int = 1000, max_proposals: int = 3) -> None:
     print(f"[1/6] Evaluating current baseline over {games} games...")
     baseline_replays = run_matches_for_submission("baseline", n_games=games)
-    baseline_stats = parse_matches(baseline_replays)
+    baseline_stats = parse_matches(baseline_replays, player=0)
 
     print("[2/6] Running analyst agent...")
     run_analyst(baseline_stats, baseline_replays)

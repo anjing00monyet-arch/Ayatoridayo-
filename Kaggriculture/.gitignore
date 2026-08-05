@@ -2,5 +2,6 @@ __pycache__/
 *.pyc
 replays/baseline/seed_*.json
 replays/candidate/seed_*.json
+replays/ab_test/
 reports/pending_prompts/*_prompt.md
 reports/pending_prompts/*_reply.md

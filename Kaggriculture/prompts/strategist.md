@@ -39,7 +39,7 @@ expected_profit = expected_revenue - purchase_cost - worker_cost - maintenance_c
 <evaluation/acceptance_gate.py のどの閾値をどれだけ上回れば採用か>
 
 ### 変更してはいけない箇所
-- 公式API（agent(observation, configuration) のシグネチャ）
+- 公式API（agent(observation) のシグネチャ）
 - 観測データ形式
 - アクション返却形式
 ```

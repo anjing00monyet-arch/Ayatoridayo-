@@ -67,6 +67,8 @@ hundreds of those into means/medians/worst-case:
   "worker_cost": 43200,
   "seed_cost": 18600,
   "animal_cost": 24500,
+  "land_cost": 3000,
+  "product_cost": 400,
   "idle_actions": 17,
   "dead_crops": 4,
   "escaped_animals": 1,
@@ -74,21 +76,32 @@ hundreds of those into means/medians/worst-case:
   "late_investment_loss": 12800,
   "revenue_by_item": {"MELON": 74500, "STRAWBERRY": 48200, "MILK": 62100},
   "critical_failures": [
-    "day 18: hired worker without profitable mission",
+    "day 18: hired a farm hand late in the season",
     "day 25: planted melon with insufficient recovery window",
-    "day 27: delayed milk sale despite falling price"
+    "day 27: sold milk while price was falling"
   ]
 }
 ```
 
+`land_cost`/`product_cost` extend the original design sketch to cover two
+Kaggriculture-specific spending categories that don't fit worker/seed/animal:
+`BUY_LAND` (unlocking quadrants) and `BUY_PRODUCT` (buying back wheat/fertilizer).
+
 ## Current build status
 
-- `game/` -- **placeholder**. The official Kaggriculture simulator isn't
-  vendored yet; `game/stub_env.py` stands in so the rest of the pipeline is
-  runnable and testable today. See `game/README.md` for how to plug in the
-  real environment.
-- `analysis/`, `evaluation/` -- fully implemented, dependency-free, and
-  runnable against the stub env right now.
+- `game/` -- **wired to the real environment**. Kaggle publishes
+  Kaggriculture as part of the open-source `kaggle_environments` framework
+  (https://github.com/Kaggle/kaggle-environments); `game/kaggriculture_env.py`
+  wraps `kaggle_environments.make("kaggriculture", ...)` directly, and
+  `game/tables.py` re-exports the real cost constants from the installed
+  package. See `game/README.md`.
+- `analysis/`, `evaluation/` -- fully implemented against the real
+  observation/action schema (`farms`, `private`, `market`, `town`; action
+  shape `{"farmer": [...], "hands": [...], "market": [...]}`). Cost/revenue
+  attribution is computed from each turn's submitted market orders against
+  the real cost tables and that turn's market prices; `qty > 1` sell/buy
+  orders are a close approximation (see replay_parser.py's docstring) since
+  the real per-unit price can drift mid-order.
 - `agents/`, `prompts/` -- fully implemented. Defaults to **manual mode**
   (see `agents/llm_client.py`): prompts are written to
   `reports/pending_prompts/` for you to run through a Claude Code session by
@@ -98,14 +111,23 @@ hundreds of those into means/medians/worst-case:
   pushes to git on its own; promoted candidates land in
   `submissions/baseline/main.py` and `reports/experiment_history.csv` for
   you to review and commit.
+- `submissions/baseline/main.py` -- starts as a vendored copy of
+  `kaggle_environments`'s built-in `starter_agent` (a carrot loop). Real,
+  legal, and intentionally simple -- the improvement loop's whole job is to
+  find and validate something that beats it.
 
 ## Recommended first workflow (semi-automatic)
 
-1. `python evaluation/run_matches.py baseline --games 1000`
+1. `python evaluation/run_matches.py baseline --games 1000` (against the
+   built-in `"random"` opponent by default; full 720-turn episodes, so
+   budget real wall-clock time -- try `--games 20 --episode-steps 96` first
+   to sanity-check locally)
 2. `python agents/analyst.py` (writes `reports/latest_analysis.md`)
 3. `python agents/strategist.py` -- read the proposals, pick one
 4. `python agents/coder.py` -- writes `submissions/candidate/main.py`
-5. `python evaluation/compare_agents.py --games 1000` -- A/B report + gate verdict
+5. `python evaluation/compare_agents.py --games 1000` -- head-to-head A/B
+   report + gate verdict (baseline vs. candidate directly, not vs. a third
+   party)
 6. If accepted, review the diff yourself, then commit
    `submissions/baseline/main.py` to a new branch and submit to Kaggle.
 

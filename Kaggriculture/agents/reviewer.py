@@ -17,7 +17,7 @@ from agents.strategist import Proposal
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PROMPT_TEMPLATE = (REPO_ROOT / "prompts" / "reviewer.md").read_text()
 
-AGENT_SIGNATURE_RE = re.compile(r"^def agent\(observation[^)]*configuration[^)]*\)", re.MULTILINE)
+AGENT_SIGNATURE_RE = re.compile(r"^def agent\(observation[^)]*\)", re.MULTILINE)
 
 
 @dataclass
@@ -30,7 +30,7 @@ class StaticCheckResult:
         lines = [
             f"{'PASS' if self.syntax_ok else 'FAIL'}  構文が正しい"
             + (f" ({self.syntax_error})" if self.syntax_error else ""),
-            f"{'PASS' if self.signature_preserved else 'FAIL'}  agent(observation, configuration) のシグネチャを維持",
+            f"{'PASS' if self.signature_preserved else 'FAIL'}  agent(observation) のシグネチャを維持",
         ]
         return "\n".join(lines)
 

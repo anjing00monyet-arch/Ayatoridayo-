@@ -21,11 +21,16 @@ def aggregate(matches: list[MatchStats]) -> dict[str, Any]:
         for item, amount in m["revenue_by_item"].items():
             revenue_totals[item] = revenue_totals.get(item, 0.0) + amount
 
-    total_cost = sum(m["worker_cost"] + m["seed_cost"] + m["animal_cost"] for m in matches)
+    total_cost = sum(
+        m["worker_cost"] + m["seed_cost"] + m["animal_cost"] + m["land_cost"] + m["product_cost"]
+        for m in matches
+    )
     cost_breakdown = {
         "worker": sum(m["worker_cost"] for m in matches),
         "seed": sum(m["seed_cost"] for m in matches),
         "animal": sum(m["animal_cost"] for m in matches),
+        "land": sum(m["land_cost"] for m in matches),
+        "product": sum(m["product_cost"] for m in matches),
     }
     cost_share = (
         {k: v / total_cost for k, v in cost_breakdown.items()} if total_cost else cost_breakdown
@@ -47,7 +52,6 @@ def aggregate(matches: list[MatchStats]) -> dict[str, Any]:
         "avg_missed_harvests": statistics.mean(m["missed_harvests"] for m in matches),
         "avg_late_investment_loss": statistics.mean(m["late_investment_loss"] for m in matches),
         "crash_count": sum(1 for m in matches if m["crashed"]),
-        "invalid_action_count": sum(m["invalid_actions"] for m in matches),
         "top_critical_failures": top_failures(matches),
     }
 
