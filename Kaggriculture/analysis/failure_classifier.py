@@ -12,26 +12,25 @@ from __future__ import annotations
 
 from typing import Any
 
+from game.kaggriculture_env import decision_pairs
 from game.tables import ANIMALS, CROPS
 
 LATE_GAME_DAY_FRACTION = 0.8  # last 20% of the season counts as "late"
 
 
-def classify_failures(steps: list[list[dict[str, Any]]], player: int) -> tuple[list[str], float]:
-    last_day = steps[-1][player]["observation"]["day"]
+def classify_failures(replay: dict[str, Any], player: int) -> tuple[list[str], float]:
+    pairs = decision_pairs(replay, player)
+    last_day = replay["steps"][-1][player]["observation"]["day"]
     late_day_threshold = int(last_day * LATE_GAME_DAY_FRACTION)
 
     failures: list[str] = []
     late_investment_loss = 0.0
 
-    for t in range(len(steps) - 1):
-        agent_state = steps[t][player]
-        obs = agent_state["observation"]
+    for i, (obs, action) in enumerate(pairs):
         day = obs["day"]
         if day < late_day_threshold:
             continue
 
-        action = agent_state.get("action") or {}
         for order in action.get("market", []) or []:
             if not order:
                 continue
@@ -61,9 +60,9 @@ def classify_failures(steps: list[list[dict[str, Any]]], player: int) -> tuple[l
                     )
                     late_investment_loss += ANIMALS.get(animal, {}).get("cost", 0)
 
-            elif op == "SELL" and len(order) >= 2 and t > 0:
+            elif op == "SELL" and len(order) >= 2 and i > 0:
                 item = order[1]
-                prev_price = steps[t - 1][player]["observation"]["market"]["prices"].get(item)
+                prev_price = pairs[i - 1][0]["market"]["prices"].get(item)
                 cur_price = obs["market"]["prices"].get(item)
                 if prev_price is not None and cur_price is not None and cur_price < prev_price:
                     failures.append(

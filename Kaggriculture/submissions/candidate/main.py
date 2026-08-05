@@ -4,8 +4,12 @@ This file is the working slot for the current improvement proposal.
 `agents/coder.py` overwrites it; `evaluation/compare_agents.py` A/B tests it
 against `submissions/baseline/main.py`. Once it clears
 `evaluation/acceptance_gate.py`, `run_improvement_loop.py` promotes it by
-copying it over the baseline. Starts out identical to the baseline (a
-vendored copy of `kaggle_environments`'s built-in `starter_agent`).
+copying it over the baseline.
+
+Current proposal: stop buying a carrot seed once there's not enough season
+left for it to mature (`agents/analyst.py` flagged this as the single most
+common critical failure across 30 baseline games -- see
+reports/latest_analysis.md).
 
 Do not change the `agent(observation) -> action` signature or the action
 return shape -- that is the official Kaggle submission API. See
@@ -19,6 +23,10 @@ from game.tables import CROPS
 
 Observation = dict[str, Any]
 Action = dict[str, Any]
+
+# agent() receives no `configuration`, so the season length can't be read
+# from the observation -- this hardcodes the documented default (30 days).
+SEASON_DAYS = 30
 
 
 def agent(observation: Observation) -> Action:
@@ -38,7 +46,15 @@ def agent(observation: Observation) -> Action:
     market = []
     if shed.get("CARROT", 0) > 0:
         market.append(["SELL", "CARROT", shed["CARROT"]])
-    if seeds.get("CARROT", 0) == 0 and farm["money"] >= CROPS["CARROT"]["seed"]:
+    # Analyst finding: every baseline game bought a doomed carrot seed around
+    # day 28 (2 days left, needs 3 to reach max_yield_day) -- last day a new
+    # planting can still mature before season end.
+    last_plantable_day = SEASON_DAYS - 1 - CROPS["CARROT"]["max_yield_day"]
+    if (
+        seeds.get("CARROT", 0) == 0
+        and farm["money"] >= CROPS["CARROT"]["seed"]
+        and day <= last_plantable_day
+    ):
         market.append(["BUY_SEED", "CARROT", 1])
 
     farmer = ["PASS"]

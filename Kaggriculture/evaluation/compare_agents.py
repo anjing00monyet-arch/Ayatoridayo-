@@ -61,7 +61,7 @@ def evaluate_ab(
 
         if any(step[candidate_idx]["status"] in ("ERROR", "TIMEOUT", "INVALID") for step in replay["steps"]):
             crash_count += 1
-        invalid_action_count += analyze_actions(replay["steps"], candidate_idx)["blocked_plant_actions"]
+        invalid_action_count += analyze_actions(replay, candidate_idx)["blocked_plant_actions"]
 
     wins = sum(1 for d in deltas if d > 0)
 

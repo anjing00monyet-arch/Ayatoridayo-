@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from game.kaggriculture_env import decision_pairs
+
 
 def _ops(action: dict[str, Any] | None) -> list[list[Any]]:
     action = action or {}
@@ -19,17 +21,14 @@ def _ops(action: dict[str, Any] | None) -> list[list[Any]]:
     return [farmer_op, *hand_ops]
 
 
-def analyze_actions(steps: list[list[dict[str, Any]]], player: int) -> dict[str, Any]:
+def analyze_actions(replay: dict[str, Any], player: int) -> dict[str, Any]:
     idle_turns = 0
     blocked_plant_actions = 0
     watering_lapses = 0
     feeding_lapses = 0
     sales: list[tuple[int, str, float | None]] = []
 
-    for t in range(len(steps) - 1):
-        agent_state = steps[t][player]
-        obs = agent_state["observation"]
-        action = agent_state.get("action") or {}
+    for obs, action in decision_pairs(replay, player):
         farm = obs["farms"][player]
         private = obs.get("private", {}) or {}
 
@@ -69,7 +68,7 @@ def analyze_actions(steps: list[list[dict[str, Any]]], player: int) -> dict[str,
 
 
 def analyze_matches(replays: list[dict[str, Any]], player: int) -> dict[str, Any]:
-    per_match = [analyze_actions(r["steps"], player) for r in replays]
+    per_match = [analyze_actions(r, player) for r in replays]
     n = max(len(per_match), 1)
     return {
         "avg_idle_turns": sum(m["idle_turns"] for m in per_match) / n,

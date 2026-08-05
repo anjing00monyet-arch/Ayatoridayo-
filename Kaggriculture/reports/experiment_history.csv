@@ -1,1 +1,2 @@
 timestamp,proposal_title,accepted,mean_profit_delta,median_profit_delta,win_rate_delta,crash_count,invalid_action_count,worst_scenario_delta
+2026-08-05T23:27:31.780732+00:00,終盤の無駄なCARROT種購入を停止,False,20.0,20.0,0.5,0,0,20.0

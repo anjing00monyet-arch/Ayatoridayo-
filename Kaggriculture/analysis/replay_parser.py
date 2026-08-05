@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from analysis.failure_classifier import classify_failures
+from game.kaggriculture_env import decision_pairs
 from game.tables import ANIMALS, CROPS, hire_cost, land_cost
 
 MatchStats = dict[str, Any]
@@ -63,20 +64,18 @@ def parse_match(replay: dict[str, Any], player: int) -> MatchStats:
     worker_cost = seed_cost = animal_cost = land_cost_total = product_cost = 0.0
     idle_actions = 0
 
-    for t in range(len(steps) - 1):
-        agent_state = steps[t][player]
-        obs = agent_state["observation"]
+    for obs, action in decision_pairs(replay, player):
         farm = obs["farms"][player]
         market = obs["market"]
         prices = market.get("prices", {})
 
-        ops = _ops(agent_state.get("action"))
+        ops = _ops(action)
         idle_actions += sum(1 for op in ops if op and op[0] == "PASS")
 
         hires_so_far = farm.get("hires_today", 0)
         quadrants_so_far = len(farm.get("unlocked_quadrants", ["NW"]))
 
-        for order in (agent_state.get("action") or {}).get("market", []) or []:
+        for order in action.get("market", []) or []:
             if not order:
                 continue
             op = order[0]
@@ -104,7 +103,7 @@ def parse_match(replay: dict[str, Any], player: int) -> MatchStats:
                 product_cost += prices.get(item, 0) * qty
 
     dead_crops, escaped_animals, missed_harvests = _diff_tile_events(steps, player)
-    critical_failures, late_investment_loss = classify_failures(steps, player)
+    critical_failures, late_investment_loss = classify_failures(replay, player)
 
     return {
         "seed": replay.get("seed"),

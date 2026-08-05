@@ -59,3 +59,24 @@ def final_status(replay: dict[str, Any], player: int) -> str:
 
 def crashed(replay: dict[str, Any], player: int) -> bool:
     return any(step[player]["status"] in ("ERROR", "TIMEOUT", "INVALID") for step in replay["steps"])
+
+
+def decision_pairs(replay: dict[str, Any], player: int) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Returns (observation, action) pairs where `action` is what the agent
+    actually chose *in response to* `observation`.
+
+    `kaggle_environments` stores `steps[i]["observation"]` as the state
+    *after* `steps[i]["action"]` was applied -- i.e. the action recorded
+    at index i was decided from `steps[i-1]`'s observation, not its own.
+    Naively zipping `steps[t]["observation"]` with `steps[t]["action"]`
+    pairs each action with the observation it produced instead of the one
+    that caused it (confirmed empirically: a BUY_SEED order shows up at
+    the same index where `seeds` already reads 1, i.e. post-purchase).
+    Use this helper instead of indexing `steps` directly when attributing
+    an action to "what the agent saw at decision time".
+    """
+    steps = replay["steps"]
+    return [
+        (steps[t][player]["observation"], steps[t + 1][player].get("action") or {})
+        for t in range(len(steps) - 1)
+    ]
