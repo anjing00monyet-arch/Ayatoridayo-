@@ -12,15 +12,15 @@ from experiments.frozen_route.parametrized_agent import Params
 from experiments.frozen_route.search import evaluate
 
 CANDIDATES: dict[str, Params] = {
-    "wheat_2_only": Params(wheat_tiles=2),
-    "wheat_2_hands_11": Params(wheat_tiles=2, target_hands=11),
     "wheat_1": Params(wheat_tiles=1),
+    "wheat_2_only": Params(wheat_tiles=2),
     "wheat_3": Params(wheat_tiles=3),
-    "wheat_2_reserve_2000": Params(wheat_tiles=2, cash_reserve=2000),
+    "wheat_2_reserve_1000": Params(wheat_tiles=2, cash_reserve=1000),
+    "wheat_2_hands_11": Params(wheat_tiles=2, target_hands=11),
     "wheat_2_ramp_4": Params(wheat_tiles=2, hire_ramp_per_day=4),
-    "wheat_2_farmer_cow_only": Params(wheat_tiles=2, farmer_animals=("COW",)),
-    "wheat_2_hand_cow_only": Params(wheat_tiles=2, hand_animals=("COW",)),
-    "wheat_2_strawberry": Params(wheat_tiles=2, secondary_crop="STRAWBERRY"),
+    "wheat_1_reserve_1000": Params(wheat_tiles=1, cash_reserve=1000),
+    "everything": Params(wheat_tiles=2, cash_reserve=1000, target_hands=11, hire_ramp_per_day=4),
+    "everything_wheat1": Params(wheat_tiles=1, cash_reserve=1000, target_hands=11, hire_ramp_per_day=4),
 }
 
 if __name__ == "__main__":
