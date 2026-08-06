@@ -214,45 +214,60 @@ _SELL_SHIFT = {
 }
 
 
-def _shift_sell_schedule(actions, shift_map):
+def _shift_sell_schedule(actions, shift_map, max_orders=10):
     """Moves each SELL order's turn by `shift_map[item]` steps, merging
-    quantities where two shifted turns collide, and leaves every other
-    action (movement, PLANT/HARVEST/FEED/CARE, HIRE, BUY_*) exactly on
-    the recorded schedule -- only SELL timing changes, so shed inventory
-    and every other game-state-dependent action stays exactly as valid as
-    in the original recording; `_safe_market` (already in this file)
-    clamps any SELL quantity that arrives at its new turn before the
-    corresponding harvest/collection has actually happened yet.
+    quantities where two shifted turns land on the same item, and leaves
+    every other action (movement, PLANT/HARVEST/FEED/CARE, HIRE, BUY_*)
+    exactly on the recorded schedule -- only SELL timing changes, so shed
+    inventory and every other game-state-dependent action stays exactly
+    as valid as in the original recording.
+
+    A shifted SELL that would push a turn's order count past
+    `maxMarketOrdersPerTurn` (`max_orders`) cascades forward to the next
+    turn with room instead of landing there anyway: `_process_market` in
+    the installed kaggle_environments package truncates any turn's order
+    queue to `max_orders` (`queues.append(q[:max_orders])`), silently
+    dropping whatever's past the cutoff -- ten turns in the recorded
+    schedule already sit at or near that cap (up to 13 orders on one
+    turn), so appending a shifted SELL on top without this cascade would
+    just get silently discarded, a pure revenue loss for no benefit.
     """
     last = len(actions) - 1
-    by_step = [
+    non_sell = [
         [
             order for order in (entry.get("market") or [])
             if not (isinstance(order, list) and order and order[0] == "SELL")
         ]
         for entry in actions
     ]
+    placed: list[dict] = [dict() for _ in actions]
 
-    pending = {}
     for step, entry in enumerate(actions):
         for order in (entry.get("market") or []):
             if not (isinstance(order, list) and len(order) >= 3 and order[0] == "SELL"):
                 continue
             item, qty = order[1], order[2]
-            new_step = min(max(0, step + shift_map.get(item, 0)), last)
-            pending.setdefault(new_step, {}).setdefault(item, 0)
-            pending[new_step][item] += qty
+            target = min(max(0, step + shift_map.get(item, 0)), last)
+            landing = target
+            while landing <= last:
+                if item in placed[landing]:
+                    placed[landing][item] += qty
+                    break
+                if len(non_sell[landing]) + len(placed[landing]) < max_orders:
+                    placed[landing][item] = qty
+                    break
+                landing += 1
+            else:
+                # No room anywhere from the target turn through the end of
+                # the game -- fall back to the original turn, which always
+                # had room for this exact order before the shift.
+                placed[step][item] = placed[step].get(item, 0) + qty
 
     shifted = []
     for step, entry in enumerate(actions):
-        new_entry = {
-            "farmer": entry.get("farmer"),
-            "hands": entry.get("hands"),
-            "market": list(by_step[step]),
-        }
-        for item, qty in pending.get(step, {}).items():
-            new_entry["market"].append(["SELL", item, qty])
-        shifted.append(new_entry)
+        market = list(non_sell[step])
+        market.extend(["SELL", item, qty] for item, qty in placed[step].items())
+        shifted.append({"farmer": entry.get("farmer"), "hands": entry.get("hands"), "market": market})
     return shifted
 
 
