@@ -1,52 +1,35 @@
-"""Candidate: opponents/submission_29 + per-item sell-timing offset
-+ retry-on-shortfall for HIRE/BUY_ANIMAL/BUY_SEED.
+"""Candidate: opponents/submission_29 + retry-on-shortfall for
+HIRE/BUY_LAND/BUY_ANIMAL/BUY_SEED (`_purchase_retry`, below `agent`).
 
 Built directly on a real, stronger public submission (submission_29)
 instead of continuing our own v9 lineage -- see reports/latest_analysis.md
 "Round 10" and opponents/README.md for the reasoning.
 
-The one change from the verbatim baseline (submissions/baseline/main.py):
-`_shift_sell_schedule`, applied once to `_ACTIONS` right after it's
-decoded. An earlier attempt at an "endgame liquidation" pass (sell
-gradually across the last ~30 turns instead of one terminal dump) measured
-no real edge in a mirror match (candidate vs. unmodified baseline, 5
-seeds: +$50 mean, sign flipping per seed) -- because a genuine baseline
-vs. baseline mirror match showed the shed is *already empty* going into
-the terminal turn (submission_29 already sells continuously all game, not
-in one lump at the end), so there was no terminal glut to fix.
+This file went through several mirror-defense ideas the user asked for
+("even against a mirror opponent, find a way to still sell through") that
+were tried, measured, and dropped -- see opponents/README.md's "Round 11"
+section for the full trace. In short: an endgame-liquidation pass found no
+terminal glut to fix (submission_29 already sells continuously, not in one
+lump); a per-item sell-timing shift (sell commonly-mirrored items earlier
+or later than the recorded schedule, to avoid a same-item/same-turn price
+collision with a near-identical opponent) went through three designs and
+was measured at every step, but its best, safest version still cost ~6%
+against a true mirror with no way found to turn that into a net gain --
+apparently this game's per-unit lockstep pricing and slow price recovery
+just don't leave much room for a timing trick to beat a real clone.
 
-The real collision is structural, not just an endgame artifact: two
-players running the same (or a similarly-derived) frozen script sell the
-*same item, same quantity, same order-slot position, same turn* over and
-over for the whole game. `_process_market` in the installed
-kaggle_environments package quotes both players' same-index order at the
-same pre-sale price and commits them in true per-unit lockstep when
-they're at the *same* slot index -- there's no way to gain an edge from a
-byte-identical clone doing that. But an item's price also carries over
-*between* order-slot rounds within a turn (`_refresh_prices` runs once
-per slot index), so whichever player's sell of a shared item lands in an
-earlier turn gets the fresher, undepressed price while the same-item sell
-on a later turn eats the depressed one. `_shift_sell_schedule` moves each
-sellable item's scripted SELL turns by a small, item-specific offset
-(leaving farmer/hand movement and every non-SELL market order exactly on
-the recorded schedule) so our sell cadence for commonly-produced items no
-longer lines up turn-for-turn with an unmodified copy of this same script
--- letting some of our sales land in turns where a near-mirror opponent
-isn't also flooding the same item.
-
-First cut at this shift regressed badly in validation (mirror match mean
-$54,625 vs. baseline's $151,550) even after fixing two real bugs (negative
-offsets selling before the harvest that produces the item, a fixed sell
-landing on a turn already at kaggriculture's 10-order cap and getting
-silently truncated). Root cause, confirmed by tracing a real game: delaying
-a sale delays the cash it brings in, and HIRE/BUY_ANIMAL/BUY_SEED have
-fixed costs that simply fail with no retry in the real env if money is
-short that exact turn -- one seed ended with 2 fewer live sheep (2 empty
-pastures) than the unmodified baseline on the identical matchup, from a
-single missed BUY_ANIMAL the frozen script never got a chance to redo.
-`_purchase_retry` (below `agent`) fixes this directly: pulls those three
-order types out of the turn's action, checks live affordability, and
-queues any shortfall to retry on later turns instead of losing it.
+What did survive, because it's a strict improvement with no observed
+downside: while chasing the sell-timing shift, tracing a real game showed
+HIRE/BUY_LAND/BUY_ANIMAL/BUY_SEED have fixed costs that silently no-op if
+money is short that exact turn, with no retry in the original script --
+one seed ended up 2 sheep short (2 empty pastures) from a single missed
+BUY_ANIMAL, and a missed BUY_LAND is worse still (strands a whole
+quadrant's later scripted actions on LOCKED tiles). `_purchase_retry`
+checks live affordability for those four order types and queues any
+shortfall to retry on later turns. Validated in isolation (sell-timing
+shift neutralized) against an unmodified mirror: an exact tie, mean delta
+-$5 over 8 seeds, sign flipping per seed -- i.e. free insurance against
+any future cash-flow disruption, with zero cost when nothing goes wrong.
 
 Original docstring, preserved:
 
@@ -205,94 +188,6 @@ _ACTIONS = json.loads(zlib.decompress(base64.b85decode(
 )).decode("utf-8"))
 
 
-# Two designs were tried and measured before this one:
-#
-# 1. Move each SELL earlier (negative shift, remove-and-reinsert). Broke
-#    outright: `_safe_market` clamps the moved order to whatever's in the
-#    shed that early (often ~0 -- the harvest that produces it hasn't
-#    necessarily happened yet), and since the original order was removed
-#    entirely, that quantity was lost for good. Mean profit vs. an
-#    unmodified mirror collapsed from $173,185 to $35,113.
-#
-# 2. Move each SELL *later* instead (delay-only, same remove-and-reinsert
-#    structure, now provably safe against the harvest-timing issue).
-#    Fixed that crash (candidate recovered to $151,550-$169,595 solo vs.
-#    "random", matching baseline's range once HIRE/BUY_LAND/BUY_ANIMAL/
-#    BUY_SEED shortfalls were also given retry logic -- see
-#    `_purchase_retry`), but a mirror match *still* lost ~24-47% depending
-#    on which purchase types had retry coverage. Root cause: delaying our
-#    sell relative to an unmodified mirror's *earlier* (unshifted) sell of
-#    the same item means the mirror always gets the fresher, undepressed
-#    price and we always eat the price its earlier sale already moved --
-#    exactly backwards from the intent.
-#
-# This is design 3: sell *earlier*, safely. Every offset here is <= 0.
-# Instead of moving the order (design 1's mistake), it ADDS an early
-# attempt at the same quantity on top of the untouched original order.
-# `_safe_market` (already earlier in this file's pipeline) clamps every
-# SELL to whatever's actually in the live shed at that moment, so the
-# early attempt only sells however much has already been produced by
-# then, and the unmodified original turn's order naturally mops up
-# whatever's left -- nothing can be oversold (both attempts check live
-# inventory) and nothing can be lost (the original order is never
-# removed), so there's no separate backlog/retry bookkeeping needed here,
-# unlike `_purchase_retry`.
-_SELL_SHIFT = {
-    "WHEAT": -2,
-    "FERTILIZER": -3,
-    "MILK": -1,
-    "WOOL": -2,
-    "MELON": -3,
-    "STRAWBERRY": -2,
-    "TOMATO": -2,
-    "CARROT": -1,
-    "EGG": -2,
-}
-
-
-def _shift_sell_schedule(actions, shift_map, max_orders=10):
-    """Adds an early attempt to sell each SELL order's quantity
-    `-shift_map[item]` turns before its recorded turn, on top of --
-    never instead of -- the original order. See the comment above
-    `_SELL_SHIFT` for why the earlier two designs (move it, in either
-    direction) both failed and why this additive approach doesn't have
-    the same failure modes.
-    """
-    last = len(actions) - 1
-    market_lists = [list(entry.get("market") or []) for entry in actions]
-    extra: list[dict] = [dict() for _ in actions]
-
-    for step, entry in enumerate(actions):
-        for order in (entry.get("market") or []):
-            if not (isinstance(order, list) and len(order) >= 3 and order[0] == "SELL"):
-                continue
-            item, qty = order[1], order[2]
-            shift = shift_map.get(item, 0)
-            target = min(max(0, step + shift), last)
-            if target >= step:
-                continue
-            landing = target
-            while landing < step:
-                if item in extra[landing]:
-                    extra[landing][item] += qty
-                    break
-                if len(market_lists[landing]) + len(extra[landing]) < max_orders:
-                    extra[landing][item] = qty
-                    break
-                landing += 1
-            # If there's no room anywhere in [target, step), skip the
-            # early attempt for this occurrence -- the original order at
-            # `step` still covers it safely either way.
-
-    shifted = []
-    for step, entry in enumerate(actions):
-        market = list(market_lists[step])
-        market.extend(["SELL", item, qty] for item, qty in extra[step].items())
-        shifted.append({"farmer": entry.get("farmer"), "hands": entry.get("hands"), "market": market[:max_orders]})
-    return shifted
-
-
-_ACTIONS = _shift_sell_schedule(_ACTIONS, _SELL_SHIFT)
 _HAZARD = json.loads(zlib.decompress(base64.b85decode(
     (
     'c-pmH*^V8z5&aiEUl?4AWZslOag4|jpa?J$!(S5Q-;-f+A~(C5=kVUnJP8_3aVyqxYUzJ{a3B8g>#rYv`OBw|-'
@@ -731,17 +626,16 @@ def _purchase_retry(obs, action, step):
     """HIRE/BUY_LAND/BUY_ANIMAL/BUY_SEED have fixed per-unit costs and, in
     the real env, simply no-op if money is short that exact turn -- a
     frozen script has no way to notice or recover, so one bad cash-flow
-    moment (e.g. `_shift_sell_schedule` delaying a sale later than the
-    recording assumed) permanently loses that purchase for the rest of
-    the game. BUY_LAND is the worst case: missing it strands an entire
-    quadrant's worth of the script's later farmer/hand actions as no-ops
-    against still-LOCKED tiles. Confirmed with a real trace: an early
-    version of the sell-shift candidate (before this function existed)
-    ended one seed with 2 fewer live sheep (2 empty pastures) than the
-    unmodified baseline on the identical matchup, from a single missed
-    BUY_ANIMAL -- and even after adding retry for HIRE/BUY_ANIMAL/BUY_SEED
-    alone, a large mirror-match gap remained (candidate $79,234 vs.
-    baseline $148,572 mean, 8 seeds) until BUY_LAND was added here too.
+    moment permanently loses that purchase for the rest of the game.
+    BUY_LAND is the worst case: missing it strands an entire quadrant's
+    worth of the script's later farmer/hand actions as no-ops against
+    still-LOCKED tiles. Found while chasing a sell-timing mirror-defense
+    idea that was ultimately dropped (see the module docstring and
+    opponents/README.md's "Round 11"): delaying a scripted sale by even a
+    few turns delayed the cash it brings in enough to make a later
+    scheduled purchase silently fail. Confirmed with a real trace: one
+    seed ended up 2 sheep short (2 empty pastures) from a single missed
+    BUY_ANIMAL, tracing back to that delay.
 
     This pulls all four order types out of the turn's action, checks live
     affordability (money, `hires_today`, and unlocked-quadrant count from

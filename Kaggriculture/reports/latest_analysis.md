@@ -224,3 +224,58 @@ submission_29's more elaborate market-timing logic, reinforcing that
 land expansion (not market tricks) is likely the biggest unclaimed lever.
 `opponents/README.md`'s "Round 9" and "submission_29" sections have the
 full decode, the before/after fix numbers, and updated next levers.
+
+## Round 10 (v9 rejected; submission_29 adopted as the new base)
+
+User rejected continuing the v9 lineage given round 9's benchmark result
+and asked to build directly on submission_29 instead, with a specific ask
+to find a way to still profit against a mirror opponent (common on the
+real leaderboard, since many entries converge on the same strong public
+notebooks). `submissions/baseline/main.py` and
+`submissions/candidate/main.py` were both replaced with submission_29
+verbatim as the new starting point.
+
+## Round 11 (mirror-defense investigated; one safe fix kept, three ideas dropped -- REJECTED by the gate, promotion is the user's call)
+
+Three ideas for beating a mirror opponent, tried and measured in order:
+
+1. Endgame liquidation (spread the final sell-off over ~30 turns instead
+   of one terminal dump) -- no edge; a real mirror match showed the shed
+   is already empty by the terminal turn, since submission_29 sells
+   continuously all game rather than hoarding.
+2. Per-item sell-timing shift, delay direction -- first attempt regressed
+   badly (mirror match: $54,625 vs. baseline's $151,550) from two bugs
+   (selling before the harvest that produces the item; a shifted sell
+   landing on a turn already at the engine's 10-order cap and getting
+   silently truncated), and even after fixing both plus adding retry logic
+   for HIRE/BUY_ANIMAL/BUY_SEED/BUY_LAND (`_purchase_retry` -- found
+   necessary after tracing a real game to a missed BUY_ANIMAL costing 2
+   sheep), the mirror match was still down ~24%: delaying our sell handed
+   the *unshifted* mirror the fresher price on every shared item, exactly
+   backwards from the intent.
+3. Per-item sell-timing shift, early direction (additive, not
+   move-and-replace) -- closed most of the gap (mirror match mean delta
+   improved from -$33,424 to **-$7,477**, ~78% better) by adding an early
+   sell attempt on top of the untouched original order, letting
+   `_safe_market`'s existing live-shed clamp handle safety with no
+   separate backlog. Doubling every offset's magnitude produced no further
+   improvement (-$7,551, within noise) -- a real plateau. **No version of
+   this shift ever reached parity or a positive edge against a true
+   mirror**; this game's per-unit lockstep pricing and slow price recovery
+   (`_town_consume` pulls back only 1-2 units per interval) apparently
+   don't leave room for a within-script timing trick to beat a genuine
+   clone.
+
+**Kept: `_purchase_retry` alone**, sell-timing shift removed entirely.
+Isolated test against a real mirror (shift neutralized): an exact tie,
+mean delta **+$10 over 10 seeds** (sign flipping), plus a healthy
+$188,099 mean solo vs. "random" -- a strict, zero-downside hardening fix
+against any future cash-flow disruption, kept on that basis alone.
+`submissions/candidate/main.py` is now submission_29 + `_purchase_retry`.
+
+The acceptance gate formally **REJECTS** this (mean delta $10, nowhere
+near the $5,000 bar) exactly as designed. Unlike round 7's non-negative
+bug fix, whether to manually promote a zero-average, zero-downside
+hardening fix is left to the user -- `opponents/README.md`'s "Round 11"
+section has the full trace and the updated "Remaining levers" (land
+expansion is still the best-supported unclaimed lever).

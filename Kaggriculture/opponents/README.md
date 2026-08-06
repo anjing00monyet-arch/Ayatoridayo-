@@ -366,6 +366,96 @@ with the submission_27 deficit despite submission_29's much more
 elaborate market-timing logic (see "Benchmark results" above and
 "Remaining levers" below for what's likely actually driving the gap).
 
+## Round 10: v9 rejected, submission_29 adopted as the new base
+
+The user rejected continuing the v9 lineage and asked to build directly on
+submission_29 instead, since it's a real, stronger public submission (v9
+lost to it by ~3.5x in round 9's benchmark) and the user specifically
+wanted a plan for still "selling through" a mirror opponent at the end --
+common on the real leaderboard, where many entries converge on a handful
+of strong public notebooks. `submissions/baseline/main.py` and
+`submissions/candidate/main.py` were both replaced with submission_29
+verbatim as the new starting point (see round 11 for what candidate
+became).
+
+## Round 11: mirror-defense investigation (one fix kept, three ideas dropped)
+
+Three ideas for beating a mirror opponent were tried and measured, in
+order, each ruled out by a real head-to-head test before moving to the
+next:
+
+1. **Endgame liquidation** -- spread the shed's contents across the last
+   ~30 turns instead of one terminal dump at step 718, on the theory that
+   two mirrors dumping the same leftover items on the same last turn split
+   an avoidable price crash. Measured no edge (mirror match, 5 seeds: +$50
+   mean, sign flipping) because a real baseline-vs-baseline mirror match
+   showed the shed is *already empty* going into the terminal turn --
+   submission_29 already sells continuously all game, so there was no
+   terminal glut to fix in the first place.
+
+2. **Per-item sell-timing shift, delay direction** -- the real collision
+   turned out to be structural, not an endgame artifact: two players
+   running the same script sell the *same item, same quantity, same
+   order-slot, same turn* all game. `_process_market` (installed
+   kaggle_environments) quotes both players' same-index order at the same
+   pre-sale price when they're at the *same* slot index (no edge possible
+   there), but a shared item's price also carries over *between* order-slot
+   rounds within a turn, so whoever sells a shared item on an *earlier*
+   turn gets the fresher price. First attempt shifted each item's SELL
+   turns later by a small offset (delay is always "safe" in the sense that
+   the item is definitely already in the shed by then). This regressed
+   badly at first (mirror match: candidate $54,625 vs. baseline $151,550)
+   even after fixing two real bugs along the way (a negative-offset
+   variant sold before the harvest that produces the item and lost the
+   quantity for good; a positive-offset order sometimes landed on a turn
+   already at kaggriculture's 10-order cap and got silently truncated).
+   Root cause, confirmed by tracing a real game: delaying a sale delays
+   its cash, and HIRE/BUY_ANIMAL/BUY_SEED/BUY_LAND have fixed costs that
+   silently no-op if money is short that exact turn, with the frozen
+   script having no way to retry -- one seed ended up 2 sheep short (2
+   empty pastures) from a single missed BUY_ANIMAL. Adding retry logic for
+   all four order types (`_purchase_retry`) fixed the general regression
+   (solo vs. "random" recovered to submission_29's normal range) but the
+   mirror match was *still* down ~24% -- because delaying our sell relative
+   to an *unshifted* mirror's earlier sell of the same item is exactly
+   backwards: the mirror gets the fresh price and we eat the depressed one.
+
+3. **Per-item sell-timing shift, early direction (additive)** -- reversed
+   the sign and the mechanism: instead of moving the SELL order (which
+   either loses the sale early or helps the mirror when delayed), *add* an
+   early attempt on top of the untouched original order. `_safe_market`
+   (already in the pipeline) clamps every SELL to the live shed, so the
+   early attempt only sells what's already been produced by then, and the
+   unmodified original order safely mops up the rest -- no separate
+   backlog needed, nothing can be oversold or lost. This closed most of
+   the gap (mirror match mean delta improved from -$33,424 with earlier
+   partial fixes to **-$7,477**, an ~78% reduction), but doubling every
+   offset's magnitude produced no further improvement (-$7,551, within
+   noise of the smaller version) -- a genuine plateau, not a tuning gap.
+   **No version of the sell-timing shift ever reached parity or a positive
+   edge against a true mirror.**
+
+**Kept: `_purchase_retry` alone**, with the sell-timing shift removed
+entirely. Isolated test (shift neutralized to zero) against a real mirror:
+an exact tie, mean delta **+$10 over 10 seeds** (sign flipping per seed),
+plus a healthy $188,099 mean solo vs. "random" -- a strict hardening fix
+with zero observed downside, kept for the real (if rare) risk of a
+scheduled HIRE/BUY_LAND/BUY_ANIMAL/BUY_SEED failing for reasons other than
+our own sell-timing changes (e.g. an unusually bad early-game market run
+against a real, unpredictable opponent). `submissions/candidate/main.py`
+now holds submission_29 + `_purchase_retry` only.
+
+**Conclusion on the mirror-defense question**: this game's per-unit
+lockstep pricing and slow price recovery (town consumption pulls only 1-2
+units back per interval, per `_town_consume`) apparently don't leave much
+room for a within-script timing trick to beat a genuine mirror -- a true
+mirror match seems to be a close-to-exact split by construction, not an
+exploitable inefficiency. The acceptance gate formally REJECTS this
+candidate (mean delta $10, nowhere near the $5,000 bar) exactly as
+designed -- unlike round 7's non-negative bug fix, whether to promote a
+zero-average, zero-downside hardening fix without a further round is the
+user's call, not something to do unilaterally.
+
 ## Remaining levers (not yet tried)
 
 1. **Land expansion**, once headcount is no longer the constraint it
