@@ -125,7 +125,42 @@ the hand caretaker (pushed every crop tile 1 tile farther from the shed,
 -$4,482) made things worse, so 2+2 is this design's ceiling.
 
 vs. `opponents/submission_27`: deficit narrowed slightly further to
-~5.3-5.5x. Full numbers and the remaining levers (land expansion, ongoing
-crops, squeezing the existing tiles rather than adding more animals) are
-in `opponents/README.md`'s "Round 5" section.
-`submissions/candidate/main.py` holds this round's code.
+~5.3-5.5x. Full numbers in `opponents/README.md`'s "Round 5" section.
+
+## Round 6 (accepted, promoted to baseline as v7)
+
+Round 5's candidate already had both caretakers calling
+`COLLECT_FERTILIZER`, but `FERTILIZER` was never in `SELLABLE` -- it sat
+dead in the shed all game (74 units at game end in one test). Adding it
+was a one-line, zero-risk fix worth +$6,958 revenue on its own. Bundled
+with round 5's farmer dual duty and measured together against v4 over 15
+real games: **+$17,150 mean profit, 100% win rate, zero crashes --
+ACCEPTED**, promoted as v7.
+
+vs. `opponents/submission_27`: deficit narrowed from ~6x to **~4.0-4.5x**.
+
+## Round 7 (manually promoted to baseline as v8 -- gate said reject)
+
+Investigating a leftover un-placed sheep in v7's shed found the same bug
+class as round 4, in a new spot: a weed can spawn on an animal tile
+before its pasture is built there (weeds only check `is None`, and a
+WEED dict isn't `None`), permanently blocking that slot since "build
+pasture" never matches a WEED. Added a DIG step below the feed loop.
+
+Measured over 15 real games against v7: 14 showed exactly zero
+difference (the weed-on-pasture event is rare -- 0.005/tile/day across
+~4 tiles) and 1 showed +$8,858. Mean profit landed at only +$591,
+correctly failing the gate's $5,000 bar -- but no game was ever worse
+than v7 (`worst_scenario_delta` was exactly $0.0). Asked the user how to
+treat a fix that provably cannot backfire but averages below the bar;
+**they chose to promote it manually**, reasoning that the $5,000 bar
+exists to catch risky strategy changes, not to block strictly
+non-negative bug fixes. `reports/experiment_history.csv` still shows the
+gate's actual verdict (REJECTED) for this entry -- it's a log of what the
+gate said, not of promotion decisions.
+
+vs. `opponents/submission_27`: ~4.0-4.1x deficit, essentially unchanged
+from v7 since the fix's benefit is real but rare.
+`opponents/README.md`'s "Round 6" and "Round 7" sections have the full
+writeup and the next levers (land expansion, ongoing crops, more
+free-money checks like round 6's).

@@ -42,6 +42,8 @@ vs. `opponents/submission_27/main.py`, 3 seeds, 720-turn games:
 | single-tile carrot loop (pre-session baseline) | $3,504 | $186,169 | ~53x |
 | v3: multi-unit crop scale-up (10 hands, melon/wheat) | ~$19,900-20,100 | ~$174,000-189,000 | ~9x |
 | v4: v3 + cow/sheep husbandry | ~$27,600-29,700 | ~$163,000-196,000 | ~6x |
+| v7: + farmer dual duty + sell fertilizer | ~$40,800-42,900 | ~$172,400-182,900 | ~4.0-4.5x |
+| v8: + weed-blocks-pasture fix | ~$42,600-45,100 | ~$172,400-181,100 | ~4.0-4.1x |
 
 Each round closed the gap further but none has won yet.
 
@@ -157,24 +159,64 @@ Tuning (each measured over 10-20 real games against v4):
   (+$3,538 over 15 games) -- $1,500 stands.
 
 **Status**: farmer + 2 animals (cow + sheep) is a real, safe, consistently
-positive improvement (100% win rate across every sample taken) that the
-acceptance gate correctly rejects for falling short of the $5,000 bar --
-this is the gate working as designed, not a flaw. vs.
-`opponents/submission_27`: deficit narrowed slightly further, to ~5.3-5.5x
-(~$32,500-34,800 vs. ~$175,000-185,000 across 3 seeds), continuing the
-per-round progression 53x -> 9x -> 6x -> ~5.4x.
-`submissions/candidate/main.py` holds this round's code; all seven
-attempts across rounds 4-5 are logged in `reports/experiment_history.csv`.
+positive improvement (100% win rate across every sample taken) but was
+still short of the $5,000 bar on its own -- see round 6 for what closed
+that gap.
+
+## Round 6: free money already being collected, never sold (accepted)
+
+Round 5's candidate already had both caretakers calling
+`COLLECT_FERTILIZER` daily, but `SELLABLE` never included `"FERTILIZER"`
+-- every unit collected sat dead in the shed for the rest of the game (74
+units at game end in one test run). Adding it to `SELLABLE` was a
+one-line, zero-risk change: **+$6,958 revenue** in that same test run.
+Bundled with round 5's farmer-dual-duty change and measured together
+against v4 over 15 real games: **+$17,150 mean profit, 100% win rate,
+zero crashes -- ACCEPTED**, promoted to `submissions/baseline/main.py`
+as **v7**.
+
+vs. `opponents/submission_27`: deficit narrowed from ~6x to **~4.0-4.5x**
+(~$40,800-42,900 vs. ~$172,400-182,900 across 3 seeds).
+
+## Round 7: a rare but real bug (manually promoted, gate said reject)
+
+Investigating a leftover un-placed sheep sitting in v7's shed at game end
+found another instance of the round-4-class bug: weeds only spawn on
+tiles that are still exactly `None` (`_spawn_weeds` in the installed
+`kaggle_environments` package checks `is None`), but if one spawns on an
+animal tile before its pasture gets built there, the tile becomes a WEED
+dict -- not `None` -- so the "build pasture" check silently skips it
+forever, stranding that animal slot (and whatever was bought for it) for
+the rest of the game. Added a DIG step, placed below the daily feed loop
+(not above -- the round-4 lesson about acquisition-before-upkeep applies
+here too).
+
+Measured over 15 real games against v7: **14 games showed exactly zero
+difference** (weed spawn chance is only 0.005/tile/day across ~4 animal
+tiles, so most games the bug never triggers) **and 1 game showed
++$8,858** (it did). Mean profit landed at +$591 -- correctly failing the
+gate's $5,000 bar given how rare the triggering event is -- but every
+single game was `>=` v7, never worse; `worst_scenario_delta` was exactly
+$0.0. Presented this to the user as a judgment call (the numeric bar
+exists to catch strategy changes that look good on average but can
+backfire in some scenario; a fix that provably cannot make any game worse
+isn't that kind of change), and **the user chose to promote it manually,
+bypassing the gate** -- now **v8** in `submissions/baseline/main.py`.
+`reports/experiment_history.csv` still records the gate's own verdict
+(REJECTED) for this entry, since that CSV is a log of what the gate
+actually said, not of promotion decisions.
+
+vs. `opponents/submission_27`: ~4.0-4.1x deficit, consistent with v7
+(the fix's benefit is real but rare, so it barely moves the 3-seed
+average).
 
 ## Remaining levers (not yet tried)
 
 1. **Land expansion**, once headcount is no longer the constraint it
-   looks like it should be -- every version through v6 still fits inside
+   looks like it should be -- every version through v8 still fits inside
    the 24-tile NW quadrant, so this hasn't been the actual bottleneck yet.
 2. **Ongoing crops (strawberry/tomato)** and **goose/egg** for further
    income diversification, matching submission_27's mix.
-3. **A second, independent path to close the last $500-1,500** of round
-   5's gap to the acceptance bar -- e.g. give the *hand* caretaker its own
-   idle-time boost via CARE/COLLECT_FERTILIZER timing, or squeeze more
-   melon cycles out of the existing crop tiles -- rather than adding more
-   animals, which this round found saturates fast.
+3. Look for more "free money already being collected" gaps like round
+   6's -- cheap, safe wins are worth checking for before reaching for
+   riskier strategy changes.

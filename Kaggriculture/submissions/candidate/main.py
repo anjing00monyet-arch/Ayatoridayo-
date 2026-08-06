@@ -1,4 +1,40 @@
-"""Candidate v6: give the farmer dual duty instead of a second caretaker.
+"""Baseline v8: v7 + fix a rare weed-blocks-pasture-forever bug.
+
+v7 (below) cleared evaluation/acceptance_gate.py against v4 normally
+(+$17,150 mean profit, 100% win rate). This version adds one more fix
+promoted *manually*, bypassing the gate's $5,000 mean-profit bar: if a
+weed spawns on an animal tile before its pasture gets built there
+(possible since `weedSpawnChance` checks any still-empty tile, and
+pastures/animals can take a few turns to set up), the "build pasture"
+check only matches tiles that are exactly `None`, so a WEED there is
+silently skipped forever -- stranding that animal slot (and whatever was
+bought for it) for the rest of the game. Added a DIG step, below the feed
+loop so it can't repeat the earlier "acquisition blocks upkeep" mistake.
+
+Measured over 15 real games: 14 showed exactly zero difference (the rare
+weed event -- 0.005/tile/day across ~4 animal tiles -- simply didn't
+occur that game) and 1 showed +$8,858 (it did). Mean profit landed at
+only +$591 given how rare the event is, correctly failing the gate's
+$5,000 bar -- but every single game was >= the old baseline, never worse.
+The user opted to bypass the gate for this one on the reasoning that a
+provably zero-downside bug fix isn't the kind of change the $5,000 bar
+was designed to screen (it exists to catch strategy changes that might
+look good on average but backfire in some scenarios; this fix cannot
+backfire by construction).
+
+Promoted from submissions/candidate/main.py after clearing
+evaluation/acceptance_gate.py against v4: +$17,150 mean profit, 100% win
+rate, zero crashes over 15 real 720-turn games (see
+reports/experiment_history.csv). Two changes bundled together:
+
+1. Farmer dual duty (round 5, see opponents/README.md): +$4,453 mean
+   profit on its own, still short of the acceptance bar.
+2. Selling collected FERTILIZER (round 6): both caretakers already
+   called COLLECT_FERTILIZER, but `SELLABLE` never included it, so it sat
+   dead in the shed all game (74 units at game end in one test run,
+   completely wasted). Adding it to `SELLABLE` alone was worth +$6,958
+   revenue in that same test run -- free money that was already being
+   collected, just never sold.
 
 Round 4 (see opponents/README.md and reports/latest_analysis.md) tried
 scaling from v4's 1 cow + 1 sheep toward submission_27's 8 cow + 2 sheep
@@ -70,7 +106,7 @@ CROP_TILES = _NW_TILES[len(ALL_ANIMAL_TILES) :]
 # First few assigned crop units run wheat for early cash flow (also feeds
 # the animals); the rest run melon.
 CROP_PLAN = ["WHEAT"] * 4 + ["MELON"] * (len(CROP_TILES) - 4)
-SELLABLE = ("WHEAT", "MELON", "CARROT", "STRAWBERRY", "TOMATO", "MILK", "WOOL")
+SELLABLE = ("WHEAT", "MELON", "CARROT", "STRAWBERRY", "TOMATO", "MILK", "WOOL", "FERTILIZER")
 
 _STATE = {0: {}, 1: {}}
 
@@ -160,15 +196,11 @@ def _caretaker_action(farm, pos, unit_inventory, my_tiles, my_plan):
     tiles = farm["tiles"]
     wheat_held = unit_inventory.get("WHEAT", 0)
 
-    # 1. Build any un-built pasture in my group.
-    for tx, ty in my_tiles:
-        if tiles[ty][tx] is None:
-            if pos != (tx, ty):
-                return [_move_toward(pos, (tx, ty))]
-            return ["BUILD_PASTURE"]
-
-    # 2. Daily loop for animals I already have: feed first (basic needs),
-    # then care, then collect. Takes priority over placing a new animal.
+    # 1. Daily loop for animals I already have: feed first (basic needs),
+    # then care, then collect. Takes priority over any setup work below --
+    # an earlier version put "acquire a new animal" first and starved
+    # existing animals while stuck retrying a delayed purchase. See
+    # opponents/README.md's "Round 4" section.
     for (tx, ty), animal in zip(my_tiles, my_plan):
         tile = tiles[ty][tx]
         if not (isinstance(tile, dict) and tile.get("animal")):
@@ -194,7 +226,28 @@ def _caretaker_action(farm, pos, unit_inventory, my_tiles, my_plan):
                 return [_move_toward(pos, (tx, ty))]
             return ["COLLECT_FERTILIZER"]
 
-    # 3. Only once every existing animal's daily needs are met: place any
+    # 2. Clear any weed that spawned on one of my tiles before it got
+    # built. Weeds only spawn on tiles that are still `None` (empty), and
+    # once one lands here it isn't `None` anymore -- the "build pasture"
+    # check below never matches a WEED dict, so without this the slot (and
+    # whatever animal was bought for it) is stuck idle for the rest of the
+    # game. Found by inspecting a leftover un-placed sheep sitting in the
+    # shed at game end. Setup work, so it stays below the feed loop above.
+    for tx, ty in my_tiles:
+        tile = tiles[ty][tx]
+        if isinstance(tile, dict) and tile.get("kind") == "WEED":
+            if pos != (tx, ty):
+                return [_move_toward(pos, (tx, ty))]
+            return ["DIG"]
+
+    # 3. Build any un-built pasture in my group.
+    for tx, ty in my_tiles:
+        if tiles[ty][tx] is None:
+            if pos != (tx, ty):
+                return [_move_toward(pos, (tx, ty))]
+            return ["BUILD_PASTURE"]
+
+    # 4. Only once every existing animal's daily needs are met: place any
     # animal that's been bought but isn't on its pasture yet.
     for (tx, ty), animal in zip(my_tiles, my_plan):
         tile = tiles[ty][tx]
