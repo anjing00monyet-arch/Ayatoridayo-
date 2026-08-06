@@ -205,84 +205,90 @@ _ACTIONS = json.loads(zlib.decompress(base64.b85decode(
 )).decode("utf-8"))
 
 
-# Delay-only offsets. A *negative* shift tries to sell before the
-# recorded harvest/collection that produces the item has necessarily
-# happened yet -- `_safe_market` clamps the moved order to whatever's
-# actually in the shed that early (often ~0), and since the order was
-# removed from its original (safe) turn entirely, that quantity is lost
-# for good rather than merely mistimed. Confirmed by measurement: an
-# earlier version mixing negative and positive offsets collapsed mean
-# profit from $173,185 (unmodified) to $35,113 in a mirror match. Delaying
-# is always safe -- the item is still sitting in the shed later, since
-# nothing about this shift touches the farm-side actions that produce or
-# consume it -- so every offset here is >= 0.
+# Two designs were tried and measured before this one:
+#
+# 1. Move each SELL earlier (negative shift, remove-and-reinsert). Broke
+#    outright: `_safe_market` clamps the moved order to whatever's in the
+#    shed that early (often ~0 -- the harvest that produces it hasn't
+#    necessarily happened yet), and since the original order was removed
+#    entirely, that quantity was lost for good. Mean profit vs. an
+#    unmodified mirror collapsed from $173,185 to $35,113.
+#
+# 2. Move each SELL *later* instead (delay-only, same remove-and-reinsert
+#    structure, now provably safe against the harvest-timing issue).
+#    Fixed that crash (candidate recovered to $151,550-$169,595 solo vs.
+#    "random", matching baseline's range once HIRE/BUY_LAND/BUY_ANIMAL/
+#    BUY_SEED shortfalls were also given retry logic -- see
+#    `_purchase_retry`), but a mirror match *still* lost ~24-47% depending
+#    on which purchase types had retry coverage. Root cause: delaying our
+#    sell relative to an unmodified mirror's *earlier* (unshifted) sell of
+#    the same item means the mirror always gets the fresher, undepressed
+#    price and we always eat the price its earlier sale already moved --
+#    exactly backwards from the intent.
+#
+# This is design 3: sell *earlier*, safely. Every offset here is <= 0.
+# Instead of moving the order (design 1's mistake), it ADDS an early
+# attempt at the same quantity on top of the untouched original order.
+# `_safe_market` (already earlier in this file's pipeline) clamps every
+# SELL to whatever's actually in the live shed at that moment, so the
+# early attempt only sells however much has already been produced by
+# then, and the unmodified original turn's order naturally mops up
+# whatever's left -- nothing can be oversold (both attempts check live
+# inventory) and nothing can be lost (the original order is never
+# removed), so there's no separate backlog/retry bookkeeping needed here,
+# unlike `_purchase_retry`.
 _SELL_SHIFT = {
-    "WHEAT": 2,
-    "FERTILIZER": 5,
-    "MILK": 1,
-    "WOOL": 4,
-    "MELON": 3,
-    "STRAWBERRY": 2,
-    "TOMATO": 4,
-    "CARROT": 1,
-    "EGG": 3,
+    "WHEAT": -2,
+    "FERTILIZER": -3,
+    "MILK": -1,
+    "WOOL": -2,
+    "MELON": -3,
+    "STRAWBERRY": -2,
+    "TOMATO": -2,
+    "CARROT": -1,
+    "EGG": -2,
 }
 
 
 def _shift_sell_schedule(actions, shift_map, max_orders=10):
-    """Moves each SELL order's turn by `shift_map[item]` steps, merging
-    quantities where two shifted turns land on the same item, and leaves
-    every other action (movement, PLANT/HARVEST/FEED/CARE, HIRE, BUY_*)
-    exactly on the recorded schedule -- only SELL timing changes, so shed
-    inventory and every other game-state-dependent action stays exactly
-    as valid as in the original recording.
-
-    A shifted SELL that would push a turn's order count past
-    `maxMarketOrdersPerTurn` (`max_orders`) cascades forward to the next
-    turn with room instead of landing there anyway: `_process_market` in
-    the installed kaggle_environments package truncates any turn's order
-    queue to `max_orders` (`queues.append(q[:max_orders])`), silently
-    dropping whatever's past the cutoff -- ten turns in the recorded
-    schedule already sit at or near that cap (up to 13 orders on one
-    turn), so appending a shifted SELL on top without this cascade would
-    just get silently discarded, a pure revenue loss for no benefit.
+    """Adds an early attempt to sell each SELL order's quantity
+    `-shift_map[item]` turns before its recorded turn, on top of --
+    never instead of -- the original order. See the comment above
+    `_SELL_SHIFT` for why the earlier two designs (move it, in either
+    direction) both failed and why this additive approach doesn't have
+    the same failure modes.
     """
     last = len(actions) - 1
-    non_sell = [
-        [
-            order for order in (entry.get("market") or [])
-            if not (isinstance(order, list) and order and order[0] == "SELL")
-        ]
-        for entry in actions
-    ]
-    placed: list[dict] = [dict() for _ in actions]
+    market_lists = [list(entry.get("market") or []) for entry in actions]
+    extra: list[dict] = [dict() for _ in actions]
 
     for step, entry in enumerate(actions):
         for order in (entry.get("market") or []):
             if not (isinstance(order, list) and len(order) >= 3 and order[0] == "SELL"):
                 continue
             item, qty = order[1], order[2]
-            target = min(max(0, step + shift_map.get(item, 0)), last)
+            shift = shift_map.get(item, 0)
+            target = min(max(0, step + shift), last)
+            if target >= step:
+                continue
             landing = target
-            while landing <= last:
-                if item in placed[landing]:
-                    placed[landing][item] += qty
+            while landing < step:
+                if item in extra[landing]:
+                    extra[landing][item] += qty
                     break
-                if len(non_sell[landing]) + len(placed[landing]) < max_orders:
-                    placed[landing][item] = qty
+                if len(market_lists[landing]) + len(extra[landing]) < max_orders:
+                    extra[landing][item] = qty
                     break
                 landing += 1
-            else:
-                # No room anywhere from the target turn through the end of
-                # the game -- fall back to the original turn, which always
-                # had room for this exact order before the shift.
-                placed[step][item] = placed[step].get(item, 0) + qty
+            # If there's no room anywhere in [target, step), skip the
+            # early attempt for this occurrence -- the original order at
+            # `step` still covers it safely either way.
 
     shifted = []
     for step, entry in enumerate(actions):
-        market = list(non_sell[step])
-        market.extend(["SELL", item, qty] for item, qty in placed[step].items())
-        shifted.append({"farmer": entry.get("farmer"), "hands": entry.get("hands"), "market": market})
+        market = list(market_lists[step])
+        market.extend(["SELL", item, qty] for item, qty in extra[step].items())
+        shifted.append({"farmer": entry.get("farmer"), "hands": entry.get("hands"), "market": market[:max_orders]})
     return shifted
 
 
@@ -693,6 +699,8 @@ _PURCHASE_COST = {
     ("BUY_SEED", "STRAWBERRY"): 100,
     ("BUY_SEED", "MELON"): 80,
 }
+_LAND_PRICES = [1000, 2000, 4000]  # cost of the 1st/2nd/3rd extra quadrant (NW is free/starting)
+_MULTI_UNIT_OPS = ("HIRE", "BUY_LAND")  # one order entry per unit purchased, unlike BUY_ANIMAL/BUY_SEED
 _PURCHASE_STATE = {0: {"queue": []}, 1: {"queue": []}}
 
 
@@ -707,28 +715,39 @@ def _hire_cost(n_already_today):
     return _fib(max(0, int(n_already_today)))
 
 
+def _land_cost(n_unlocked_extra):
+    if n_unlocked_extra >= len(_LAND_PRICES):
+        return None
+    return _LAND_PRICES[n_unlocked_extra]
+
+
 def _emit_purchase(op, item, qty):
-    if op == "HIRE":
-        return [["HIRE"] for _ in range(qty)]
+    if op in _MULTI_UNIT_OPS:
+        return [[op] for _ in range(qty)]
     return [[op, item, qty]]
 
 
 def _purchase_retry(obs, action, step):
-    """HIRE/BUY_ANIMAL/BUY_SEED have fixed per-unit costs and, in the real
-    env, simply no-op if money is short that exact turn -- a frozen
-    script has no way to notice or recover, so one bad cash-flow moment
-    (e.g. `_shift_sell_schedule` delaying a sale later than the recording
-    assumed) permanently loses that hire/animal/seed for the rest of the
-    game. Confirmed with a real trace: an early version of the sell-shift
-    candidate ended one seed with 2 fewer live sheep (2 empty pastures)
-    than the unmodified baseline on the identical matchup, tracing back
-    to a missed BUY_ANIMAL -- about a third of that version's profit gap.
+    """HIRE/BUY_LAND/BUY_ANIMAL/BUY_SEED have fixed per-unit costs and, in
+    the real env, simply no-op if money is short that exact turn -- a
+    frozen script has no way to notice or recover, so one bad cash-flow
+    moment (e.g. `_shift_sell_schedule` delaying a sale later than the
+    recording assumed) permanently loses that purchase for the rest of
+    the game. BUY_LAND is the worst case: missing it strands an entire
+    quadrant's worth of the script's later farmer/hand actions as no-ops
+    against still-LOCKED tiles. Confirmed with a real trace: an early
+    version of the sell-shift candidate (before this function existed)
+    ended one seed with 2 fewer live sheep (2 empty pastures) than the
+    unmodified baseline on the identical matchup, from a single missed
+    BUY_ANIMAL -- and even after adding retry for HIRE/BUY_ANIMAL/BUY_SEED
+    alone, a large mirror-match gap remained (candidate $79,234 vs.
+    baseline $148,572 mean, 8 seeds) until BUY_LAND was added here too.
 
-    This pulls HIRE/BUY_ANIMAL/BUY_SEED out of the turn's action, checks
-    live affordability (money and `hires_today` from the observation, not
-    the recording) before submitting them, and queues whatever's short
-    (fully or partially) to retry on later turns once money recovers,
-    instead of letting the real env silently drop it.
+    This pulls all four order types out of the turn's action, checks live
+    affordability (money, `hires_today`, and unlocked-quadrant count from
+    the observation, not the recording) before submitting them, and
+    queues whatever's short (fully or partially) to retry on later turns
+    once money recovers, instead of letting the real env silently drop it.
     """
     seat = 1 if int(_get(obs, "player", 0) or 0) == 1 else 0
     state = _PURCHASE_STATE[seat]
@@ -740,12 +759,13 @@ def _purchase_retry(obs, action, step):
     farm = farms[seat] if seat < len(farms) else {}
     money = float(_get(farm, "money", 0) or 0)
     hires_today = int(_get(farm, "hires_today", 0) or 0)
+    unlocked_extra = max(0, len(_get(farm, "unlocked_quadrants", []) or []) - 1)
 
     passthrough = []
     fresh = []
     for order in (action.get("market") or []):
-        if isinstance(order, list) and order and order[0] == "HIRE":
-            fresh.append(("HIRE", None, 1))
+        if isinstance(order, list) and order and order[0] in ("HIRE", "BUY_LAND"):
+            fresh.append((order[0], None, 1))
         elif isinstance(order, list) and len(order) >= 3 and order[0] in ("BUY_ANIMAL", "BUY_SEED"):
             try:
                 qty = int(order[2])
@@ -757,7 +777,7 @@ def _purchase_retry(obs, action, step):
             passthrough.append(order)
 
     def spend(op, item, qty):
-        nonlocal money, hires_today
+        nonlocal money, hires_today, unlocked_extra
         if op == "HIRE":
             n = 0
             for _ in range(qty):
@@ -766,6 +786,16 @@ def _purchase_retry(obs, action, step):
                     break
                 money -= cost
                 hires_today += 1
+                n += 1
+            return n
+        if op == "BUY_LAND":
+            n = 0
+            for _ in range(qty):
+                cost = _land_cost(unlocked_extra)
+                if cost is None or money < cost:
+                    break
+                money -= cost
+                unlocked_extra += 1
                 n += 1
             return n
         cost = _PURCHASE_COST.get((op, item))
@@ -784,16 +814,16 @@ def _purchase_retry(obs, action, step):
         if room <= 0:
             remaining_queue.append((op, item, qty))
             return
-        qty_capped = min(qty, room) if op == "HIRE" else qty
+        qty_capped = min(qty, room) if op in _MULTI_UNIT_OPS else qty
         n = spend(op, item, qty_capped)
         if n > 0:
             granted.append((op, item, n))
-            room -= n if op == "HIRE" else 1
+            room -= n if op in _MULTI_UNIT_OPS else 1
         leftover = qty - n
         if leftover > 0:
             remaining_queue.append((op, item, leftover))
 
-    # Backlog first (oldest shortfalls), using live money/hires_today, then
+    # Backlog first (oldest shortfalls), using live money/hires_today/land, then
     # this turn's own fresh orders with whatever's left.
     for op, item, qty in queue:
         process(op, item, qty)
