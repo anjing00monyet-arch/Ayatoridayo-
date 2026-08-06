@@ -52,6 +52,7 @@ HIRE_RAMP_PER_DAY = 2
 ANIMAL_CARETAKER_COUNT = 4
 CROP_TENDER_HAND_COUNT = TARGET_HANDS - ANIMAL_CARETAKER_COUNT  # 10 hands + farmer = 11 crop tenders
 CASH_RESERVE = 300  # leave breathing room so BUY_ANIMAL doesn't compete straight down to $0 against hire costs
+_MIN_HANDS = 2  # never let the cash reserve block hiring down to zero hands -- see the hire_orders comment below
 
 SHED_TILE = (4, 4)
 NE_SHED_TILE = (5, 4)
@@ -286,7 +287,20 @@ def agent(observation: Observation) -> Action:
         spend = 0.0
         for i in range(wanted):
             cost = hire_cost(hires_today + i)
-            if money - spend - cost < CASH_RESERVE:
+            # The reserve must never block the first `_MIN_HANDS` hires:
+            # zero hands means zero crop/animal tending at all, which is a
+            # permanent, unrecoverable deadlock (no production -> no
+            # revenue -> money never climbs back above the reserve ->
+            # never hires again). Measured directly: money sat at exactly
+            # $298 (just under a $300 reserve) for two full days with 0
+            # hands hired, and every crop tile hand-tended up to that
+            # point died simultaneously from neglect. Cheap early hires
+            # (fib-cost 1, 1, 2, ...) are worth spending down to $0 for;
+            # the reserve only makes sense for the pricier, discretionary
+            # tail of the ramp.
+            will_have = len(hands) + len(hire_orders)
+            reserve = 0 if will_have < _MIN_HANDS else CASH_RESERVE
+            if money - spend - cost < reserve:
                 break
             spend += cost
             hire_orders.append(["HIRE"])
