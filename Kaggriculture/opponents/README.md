@@ -445,16 +445,31 @@ our own sell-timing changes (e.g. an unusually bad early-game market run
 against a real, unpredictable opponent). `submissions/candidate/main.py`
 now holds submission_29 + `_purchase_retry` only.
 
+A follow-up idea (4th attempt): grade submission_29's existing
+`_PREEMPT_FRACTION` (fixed at 0.5) by mirror confidence instead of the
+binary `_clone_distance <= 2` gate -- e.g. 0.80 at distance 0, 0.65 at
+distance 1, the original 0.5 at distance 2. Distinct from attempts 1-3
+since it tunes the *existing* preempt system rather than bypassing it.
+Measured no effect (mean delta +$16 vs. the purchase-retry-only version's
++$10, within noise). Root cause, confirmed by inspecting `_HAZARD`
+directly: of the 231 entries that clear `_PREEMPT_THRESHOLD` (0.55), the
+`median_quantity` they carry has mean 5.3 and is mode 1 -- `max(1,
+round(median_quantity * fraction))` barely changes for such small
+inputs regardless of whether `fraction` is 0.5 or 0.8, so the parameter
+has almost no practical range to exploit. Reverted (no downside kept
+around for no upside).
+
 **Conclusion on the mirror-defense question**: this game's per-unit
-lockstep pricing and slow price recovery (town consumption pulls only 1-2
-units back per interval, per `_town_consume`) apparently don't leave much
-room for a within-script timing trick to beat a genuine mirror -- a true
-mirror match seems to be a close-to-exact split by construction, not an
-exploitable inefficiency. The acceptance gate formally REJECTS this
-candidate (mean delta $10, nowhere near the $5,000 bar) exactly as
-designed -- unlike round 7's non-negative bug fix, whether to promote a
-zero-average, zero-downside hardening fix without a further round is the
-user's call, not something to do unilaterally.
+lockstep pricing, slow price recovery (town consumption pulls only 1-2
+units back per interval, per `_town_consume`), and the small scale of the
+underlying hazard data apparently don't leave much room for a
+within-script timing trick to beat a genuine mirror -- a true mirror match
+seems to be a close-to-exact split by construction, not an exploitable
+inefficiency. The acceptance gate formally REJECTS this candidate (mean
+delta $10, nowhere near the $5,000 bar) exactly as designed -- unlike
+round 7's non-negative bug fix, whether to promote a zero-average,
+zero-downside hardening fix without a further round is the user's call,
+not something to do unilaterally.
 
 ## Remaining levers (not yet tried)
 
