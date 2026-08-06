@@ -30,12 +30,15 @@ SELLABLE = ("WHEAT", "MELON", "CARROT", "STRAWBERRY", "TOMATO", "MILK", "WOOL", 
 
 @dataclass
 class Params:
+    # Defaults are the round-3 search winner (10 seeds: mean $38,278, min
+    # $36,807, zero escaped animals, zero dead crops), matching
+    # experiments/v10_scaled/agent.py.
     target_hands: int = 14
-    ramp_phase1_cap: int = 5
+    ramp_phase1_cap: int = 7
     ramp_phase2_day: int = 7
     ramp_reserve: float = 150
-    hire_ramp_per_day: int = 2
-    cash_reserve: float = 300  # discretionary-purchase-only (BUY_ANIMAL); never applied to hiring
+    hire_ramp_per_day: int = 4
+    cash_reserve: float = 500  # discretionary-purchase-only (BUY_ANIMAL); never applied to hiring
     animal_caretaker_count: int = 4
     land_day: int = 7
     land_reserve: float = 1000

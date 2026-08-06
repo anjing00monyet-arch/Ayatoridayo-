@@ -12,13 +12,26 @@ step ~169, then diverge across ~94% of the remaining turns depending on
 the opponent -- confirming a reactive, money/state-driven design much
 closer to this project's own v3-v9 lineage than to a frozen script).
 
-This is a first cut at closing that scale gap reactively (not by grafting
-foreign moves onto a fragile frozen script, which this project's own
-round 9/11/12 investigations found breaks easily under small
-perturbations): same crop-tile-tending pattern as v9, plus land expansion
-into NE for room, plus 4 dedicated animal caretaker hands instead of 1,
-covering all 14 animals instead of 4. Not yet validated -- see
-experiments/v10_scaled/bench.py.
+This closes that scale gap reactively (not by grafting foreign moves onto
+a fragile frozen script, which this project's own round 9/11/12
+investigations found breaks easily under small perturbations): same
+crop-tile-tending pattern as v9, plus land expansion into NE for room,
+plus 4 dedicated animal caretaker hands instead of 1, covering all 14
+animals instead of 4.
+
+Manually tuning the cash-flow knobs against one seed at a time went
+through 7 rounds, each fixing a different collapse (ramp reaching 14
+hands before any crop/animal could mature; a cash reserve deadlocking
+hiring at zero hands; the same trap moved to a low-hand plateau;
+caretaker hands unreliable at high indices; a ramp-reserve threshold too
+conservative then too aggressive) without ever reaching a configuration
+stable across seeds. Switching to a proper multi-seed search
+(experiments/v10_scaled/parametrized_agent.py + search*.py, 10 seeds per
+candidate, 3 rounds) found a combination -- a gentler post-bootstrap ramp
+pace, a larger phase-1 hand cap, and a higher (but not too high --
+$700 regressed badly) cash reserve on animal purchases -- that's stable
+across all 10 seeds tested (zero escaped animals, zero dead crops, mean
+$38,278, worst case $36,807).
 
 Do not change the `agent(observation) -> action` signature or the action
 return shape -- that is the official Kaggle submission API.
@@ -45,10 +58,17 @@ TARGET_HANDS = 14
 # its first harvest (melon: 12 days; cow/sheep: 6-8 days), so the economy
 # never recovered: money crashed to ~$0 by day 3 and stayed there for the
 # rest of the game, killing all 10 crop tiles and 2 animals from neglect.
-_RAMP_PHASE1_CAP = 5
+# Multi-seed searched (experiments/v10_scaled/search*.py, 10 seeds per
+# candidate, 3 rounds) rather than hand-tuned against one seed -- manual
+# single-seed tuning went through 7 rounds of one-collapse-at-a-time
+# fixes without ever reaching a configuration stable across seeds. The
+# winner (mean $38,278, min $36,807, zero escaped animals, zero dead
+# crops across 10 seeds -- round 1's best manual guess was mean $20,236
+# with min as low as $1, i.e. frequent near-total collapses):
+_RAMP_PHASE1_CAP = 7
 _RAMP_PHASE2_DAY = 7
-_RAMP_RESERVE = 150  # was 500 -- measured stuck below $200 for the first 20 days at that threshold, wasting most of the game at low scale before finally clearing it around day 24
-HIRE_RAMP_PER_DAY = 2
+_RAMP_RESERVE = 150
+HIRE_RAMP_PER_DAY = 4
 ANIMAL_CARETAKER_COUNT = 4
 CROP_TENDER_HAND_COUNT = TARGET_HANDS - ANIMAL_CARETAKER_COUNT  # 10 hands + farmer = 11 crop tenders
 # Caretakers are hand indices 0..3 -- hired *first*, not last -- so they
@@ -61,7 +81,7 @@ CROP_TENDER_HAND_COUNT = TARGET_HANDS - ANIMAL_CARETAKER_COUNT  # 10 hands + far
 # repeatedly) over a single game. Crop tenders take whatever's left
 # instead, since a few untended crop tiles is a much smaller loss than
 # a chronic animal-escape cycle.
-CASH_RESERVE = 300  # discretionary-purchase-only reserve (BUY_ANIMAL); deliberately not applied to hiring
+CASH_RESERVE = 500  # discretionary-purchase-only reserve (BUY_ANIMAL); deliberately not applied to hiring. Search-validated: $700 regressed badly (mean $26,303, min $13,633, 34 escaped animals) -- $500 is a real optimum, not "higher is safer".
 
 SHED_TILE = (4, 4)
 NE_SHED_TILE = (5, 4)
