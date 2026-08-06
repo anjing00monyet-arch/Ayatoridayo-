@@ -1,32 +1,45 @@
-"""Candidate: opponents/submission_29 + staggered endgame liquidation.
+"""Candidate: opponents/submission_29 + per-item sell-timing offset.
 
 Built directly on a real, stronger public submission (submission_29)
 instead of continuing our own v9 lineage -- see reports/latest_analysis.md
 "Round 10" and opponents/README.md for the reasoning.
 
 The one change from the verbatim baseline (submissions/baseline/main.py):
-`_endgame_liquidation` (added below `_terminal_market`, wired into `agent`
-just before its single-turn terminal dump). The original only sells its
-accumulated shed inventory once, on the very last turn (`_terminal_market`
-at step 718) -- fine against an opponent with a different sell rhythm, but
-against a genuine mirror (a near-identical opponent, which the user flagged
-as common in this competition: many public entries converge on the same
-few strong notebooks) both sides dump the *same* items into the *same*
-shared market on the *same* turn, splitting an identical price crash with
-no way for either side to gain an edge from a single, symmetric all-in dump.
+`_shift_sell_schedule`, applied once to `_ACTIONS` right after it's
+decoded. An earlier attempt at an "endgame liquidation" pass (sell
+gradually across the last ~30 turns instead of one terminal dump) measured
+no real edge in a mirror match (candidate vs. unmodified baseline, 5
+seeds: +$50 mean, sign flipping per seed) -- because a genuine baseline
+vs. baseline mirror match showed the shed is *already empty* going into
+the terminal turn (submission_29 already sells continuously all game, not
+in one lump at the end), so there was no terminal glut to fix.
 
-`kaggle_environments`' kaggriculture engine periodically pulls market
-inventory back toward its per-item target between our sales (see
-`_town_consume` in the installed package: every `townShopSellInterval`/
-`townCenterSellInterval` steps), which is what lets price recover over
-time. `_endgame_liquidation` exploits this by winding the shed down
-gradually across the last `_LIQUIDATION_START`..`_LIQUIDATION_STOP` turns
-instead of waiting for one terminal dump: each sale is smaller (less price
-impact per sale, more of it recovers before the next), and most of our
-inventory clears *before* a same-shaped mirror's own last-turn dump even
-happens, so only a small remainder is left to share that final crash.
-`_terminal_market` still runs unconditionally at step 718 as a safety net
-for whatever's left.
+The real collision is structural, not just an endgame artifact: two
+players running the same (or a similarly-derived) frozen script sell the
+*same item, same quantity, same order-slot position, same turn* over and
+over for the whole game. `_process_market` in the installed
+kaggle_environments package quotes both players' same-index order at the
+same pre-sale price and commits them in true per-unit lockstep when
+they're at the *same* slot index -- there's no way to gain an edge from a
+byte-identical clone doing that. But an item's price also carries over
+*between* order-slot rounds within a turn (`_refresh_prices` runs once
+per slot index), so whichever player's sell of a shared item lands in an
+earlier turn gets the fresher, undepressed price while the same-item sell
+on a later turn eats the depressed one. `_shift_sell_schedule` moves each
+sellable item's scripted SELL turns by a small, item-specific offset
+(leaving farmer/hand movement and every non-SELL market order exactly on
+the recorded schedule) so our sell cadence for commonly-produced items no
+longer lines up turn-for-turn with an unmodified copy of this same script
+-- letting some of our sales land in turns where a near-mirror opponent
+isn't also flooding the same item.
+
+Original docstring, preserved:
+
+v21 tactical-memory Kaggriculture agent.
+
+The field/labor route is a fit-only current-submission medoid.  Market-memory
+hazards are balanced across one fit-only medoid per current Top-30 submission.
+Runtime uses no team name, episode id, seed, notebook ownership or lookahead.
 """
 import base64
 import copy
@@ -175,6 +188,64 @@ _ACTIONS = json.loads(zlib.decompress(base64.b85decode(
     '5Ow0|LnEU?&d6kZ1'
     )
 )).decode("utf-8"))
+
+
+_SELL_SHIFT = {
+    "WHEAT": -2,
+    "FERTILIZER": 3,
+    "MILK": -1,
+    "WOOL": 2,
+    "MELON": -3,
+    "STRAWBERRY": 1,
+    "TOMATO": -1,
+    "CARROT": 2,
+    "EGG": -2,
+}
+
+
+def _shift_sell_schedule(actions, shift_map):
+    """Moves each SELL order's turn by `shift_map[item]` steps, merging
+    quantities where two shifted turns collide, and leaves every other
+    action (movement, PLANT/HARVEST/FEED/CARE, HIRE, BUY_*) exactly on
+    the recorded schedule -- only SELL timing changes, so shed inventory
+    and every other game-state-dependent action stays exactly as valid as
+    in the original recording; `_safe_market` (already in this file)
+    clamps any SELL quantity that arrives at its new turn before the
+    corresponding harvest/collection has actually happened yet.
+    """
+    last = len(actions) - 1
+    by_step = [
+        [
+            order for order in (entry.get("market") or [])
+            if not (isinstance(order, list) and order and order[0] == "SELL")
+        ]
+        for entry in actions
+    ]
+
+    pending = {}
+    for step, entry in enumerate(actions):
+        for order in (entry.get("market") or []):
+            if not (isinstance(order, list) and len(order) >= 3 and order[0] == "SELL"):
+                continue
+            item, qty = order[1], order[2]
+            new_step = min(max(0, step + shift_map.get(item, 0)), last)
+            pending.setdefault(new_step, {}).setdefault(item, 0)
+            pending[new_step][item] += qty
+
+    shifted = []
+    for step, entry in enumerate(actions):
+        new_entry = {
+            "farmer": entry.get("farmer"),
+            "hands": entry.get("hands"),
+            "market": list(by_step[step]),
+        }
+        for item, qty in pending.get(step, {}).items():
+            new_entry["market"].append(["SELL", item, qty])
+        shifted.append(new_entry)
+    return shifted
+
+
+_ACTIONS = _shift_sell_schedule(_ACTIONS, _SELL_SHIFT)
 _HAZARD = json.loads(zlib.decompress(base64.b85decode(
     (
     'c-pmH*^V8z5&aiEUl?4AWZslOag4|jpa?J$!(S5Q-;-f+A~(C5=kVUnJP8_3aVyqxYUzJ{a3B8g>#rYv`OBw|-'
@@ -265,9 +336,6 @@ _PREEMPT_COOLDOWN = 8
 _PREEMPT_START = 24
 _PREEMPT_STOP = 680
 _PREEMPT_MAX_CLONE_DISTANCE = 2
-
-_LIQUIDATION_START = 690
-_LIQUIDATION_STOP = 718
 
 
 def _get(value, key, default=None):
@@ -574,67 +642,12 @@ def _terminal_market(obs, action):
     return action
 
 
-def _endgame_liquidation(obs, action, step):
-    """Winds the shed down gradually across `_LIQUIDATION_START`..
-    `_LIQUIDATION_STOP` instead of leaving everything for the single
-    terminal dump. See the module docstring for why: it lets
-    `_town_consume`'s periodic inventory pull-back recover price between
-    sales, and gets most of our inventory out the door before a same-
-    shaped opponent's own last-turn dump collides with ours in the same
-    shared market.
-    """
-    if not (_LIQUIDATION_START <= step <= _LIQUIDATION_STOP):
-        return action
-    action = _safe_market(obs, action)
-    existing = list(action.get("market") or [])
-    room = 10 - len(existing)
-    if room <= 0:
-        return action
-    existing_items = {
-        order[1] for order in existing
-        if len(order) >= 3 and order[0] == "SELL"
-    }
-    remaining_turns = max(1, _LIQUIDATION_STOP - step + 1)
-    shed = _projected_shed(obs, action)
-    prices = _get(_get(obs, "market", {}) or {}, "prices", {}) or {}
-    exposure = _opponent_exposure(obs)
-    rows = []
-    for item in _SELLABLE:
-        if item in existing_items:
-            continue
-        quantity = max(0, int(shed.get(item, 0) or 0))
-        if quantity <= 0:
-            continue
-        score = (
-            (1.0 + exposure.get(item, 0.0))
-            * _GLUT_WEIGHT.get(item, 1.0)
-            * max(1.0, float(prices.get(item, 1) or 1))
-        )
-        rows.append((score, item, quantity))
-    rows.sort(reverse=True)
-    new_orders = []
-    for score, item, quantity in rows:
-        if room <= 0:
-            break
-        # Sell a 1/remaining_turns slice of the current holding each turn,
-        # front-loading the highest opponent-exposure items so they clear
-        # first -- those are the ones most likely to be the same items a
-        # near-mirror opponent is also about to flood.
-        slice_qty = quantity if step >= _LIQUIDATION_STOP else max(1, -(-quantity // remaining_turns))
-        new_orders.append(["SELL", item, min(slice_qty, quantity)])
-        room -= 1
-    if new_orders:
-        action["market"] = existing + new_orders
-    return action
-
-
 def agent(obs):
     try:
         step = min(max(0, int(_get(obs, "step", 0) or 0)), len(_ACTIONS) - 1)
         action = _weed_repair_action(obs, _copy_action(_ACTIONS[step]), step)
         action = _safe_market(obs, action)
         action = _preempt_action(obs, action, step)
-        action = _endgame_liquidation(obs, action, step)
         if step == 718:
             action = _terminal_market(obs, action)
         return _align_hands(action, obs)
