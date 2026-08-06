@@ -47,7 +47,7 @@ TARGET_HANDS = 14
 # rest of the game, killing all 10 crop tiles and 2 animals from neglect.
 _RAMP_PHASE1_CAP = 5
 _RAMP_PHASE2_DAY = 7
-_RAMP_RESERVE = 500
+_RAMP_RESERVE = 150  # was 500 -- measured stuck below $200 for the first 20 days at that threshold, wasting most of the game at low scale before finally clearing it around day 24
 HIRE_RAMP_PER_DAY = 2
 ANIMAL_CARETAKER_COUNT = 4
 CROP_TENDER_HAND_COUNT = TARGET_HANDS - ANIMAL_CARETAKER_COUNT  # 10 hands + farmer = 11 crop tenders
