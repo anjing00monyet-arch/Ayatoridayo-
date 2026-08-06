@@ -36,7 +36,7 @@ strategy with no hired hands, but a strong signal that hiring farm hands
 or buying land (currently completely unused) would let the agent act more
 often per turn instead of just watching one carrot grow.
 
-## Next proposal implemented and tested
+## Next proposal implemented and tested (round 1, rejected)
 
 "Stop buying a carrot seed once there isn't enough season left for it to
 mature" (`submissions/candidate/main.py`). A/B tested head-to-head against
@@ -46,3 +46,20 @@ consistent +$20/game (100% win rate, zero variance) but **rejected** by
 near the $5000 bar. Correctly rejected: real, but too small on its own.
 The cost-structure finding above (never expanding beyond one tile) is the
 much bigger opportunity for the next proposal.
+
+## Round 2 (accepted, promoted to baseline)
+
+Acted on the cost-structure finding: multi-unit scale-up (farmer + 10
+hired hands, each tending its own melon/wheat tile in the starting
+quadrant instead of one carrot tile idling 93% of turns). A/B tested over
+10 real 720-turn games against the old single-tile baseline: **+$22,433
+mean profit, 100% win rate, zero crashes/invalid actions -- ACCEPTED**,
+promoted to `submissions/baseline/main.py`.
+
+Also benchmarked (outside the acceptance gate, which only compares our own
+baseline vs. candidate) against a real, much stronger public solution
+(`opponents/submission_27`, decoded and analyzed -- see
+`opponents/README.md`): went from a ~53x deficit ($3,504 vs. $186,169) to
+a ~9x deficit (~$20,000 vs. ~$180,000). Real progress, still losing.
+`opponents/README.md` names the two biggest remaining levers (animal
+husbandry for compounding income, land expansion) as the next proposals.

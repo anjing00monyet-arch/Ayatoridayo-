@@ -17,6 +17,8 @@ Structure:
   and the working slot for the next proposal (`main.py` each)
 - `game/`: wrapper around the official `kaggle_environments` "kaggriculture"
   env (`kaggriculture_env.py`) plus shared cost constants (`tables.py`)
+- `opponents/`: real third-party agents kept as fixed strength benchmarks
+  (not part of the acceptance-gated loop) -- see `opponents/README.md`
 - `replays/`: raw per-match logs, one JSON file per seed
 - `analysis/`: replay parsing, profit/cost aggregation, action-timing and
   failure-pattern analysis
