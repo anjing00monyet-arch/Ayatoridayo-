@@ -60,6 +60,31 @@ def _tile_at(farm: dict[str, Any], pos) -> Any:
         return "LOCKED"
 
 
+def _needs_water(tile: Any) -> bool:
+    """True if standing on a live crop that hasn't been watered today --
+    missing water twice in a row kills the crop (turns it into a WEED),
+    and a different game's random weed spawns elsewhere on the board can
+    shift an actor's movement enough that the recorded script waters the
+    wrong tile at the wrong time. Watering an already-watered tile is a
+    guaranteed no-op in the real env, so this check is safe to run every
+    turn regardless of what the recording intended here.
+    """
+    return isinstance(tile, dict) and tile.get("kind") == "PLANT" and not tile.get("watered_today", False)
+
+
+def _needs_urgent_harvest(tile: Any, step: int) -> bool:
+    """True if standing on a crop past its harvest deadline that still
+    holds yield -- past `max_lifespan_step` the crop decays by 1 unit
+    every 2 turns until it dies (becomes a WEED), so a script that
+    arrives late (due to any earlier desync) needs to harvest immediately
+    rather than follow whatever it originally had scheduled for this turn.
+    """
+    if not (isinstance(tile, dict) and tile.get("kind") == "PLANT"):
+        return False
+    mls = tile.get("max_lifespan_step", -1)
+    return tile.get("yield_units", 0) > 0 and mls >= 0 and step >= mls
+
+
 def make_frozen_agent(actions: list[dict[str, Any]]):
     """Returns an `agent(observation)` that replays `actions` by step
     index, digging out and retrying any PLANT/BUILD_PASTURE that lands on
@@ -105,6 +130,22 @@ def make_frozen_agent(actions: list[dict[str, Any]]):
                 continue
             active[actor] = {"start": step, "intended": list(op)}
             ops[index] = ["DIG"]
+
+        # Crop-safety net: react to the *real* board state under each actor's
+        # feet, not just the recorded intent -- catches watering/harvest
+        # timing drift that a scripted PLANT/BUILD weed-dodge alone can't,
+        # e.g. an already-planted crop the script assumed was watered on a
+        # different turn than it actually needs to be in this game's replay.
+        # A WEED tile (mid weed-repair above) never matches either check, so
+        # this never fights the retry logic for the same actor+turn.
+        for index, pos in enumerate(positions):
+            if index >= len(ops):
+                break
+            tile = _tile_at(farm, pos)
+            if _needs_water(tile):
+                ops[index] = ["WATER"]
+            elif _needs_urgent_harvest(tile, step):
+                ops[index] = ["HARVEST"]
 
         action["farmer"] = ops[0] if ops else ["PASS"]
         action["hands"] = ops[1:]
