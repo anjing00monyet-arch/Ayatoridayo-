@@ -43,9 +43,7 @@ vs. `opponents/submission_27/main.py`, 3 seeds, 720-turn games:
 | v3: multi-unit crop scale-up (10 hands, melon/wheat) | ~$19,900-20,100 | ~$174,000-189,000 | ~9x |
 | v4: v3 + cow/sheep husbandry | ~$27,600-29,700 | ~$163,000-196,000 | ~6x |
 
-Each round closed the gap further but none has won yet. The decoded
-schedule points at the remaining levers, in rough order of expected
-impact:
+Each round closed the gap further but none has won yet.
 
 1. ~~**Animal husbandry** (cow/sheep -> milk/wool)~~ -- **done in v4**:
    compounding income from one $400-500 purchase instead of paying a
@@ -55,14 +53,67 @@ impact:
    carry `WHEAT` in inventory daily to `FEED` (unlike seeds, wheat for
    feeding is **not** auto-available -- see `_apply_unit_action`'s `FEED`
    handler in the installed `kaggle_environments` package).
-2. **More animals / land expansion**: v4 only runs 1 cow + 1 sheep with 1
-   caretaker; submission_27 runs 8 cows + 2 sheep. A second caretaker (or
-   one caretaker tending several animals per day, since the daily
-   feed/care/harvest loop only takes a handful of turns) plus buying land
-   for more pasture space is the next-highest-leverage lever.
+
+## Round 4: scaling animals further (rejected, twice)
+
+Tried to push from v4's 1 cow + 1 sheep toward submission_27's 8 cow + 2
+sheep. Three attempts, each measured head-to-head against v4 over 10 real
+720-turn games via `evaluation/compare_agents.py`:
+
+1. **TARGET_HANDS 10 -> 18 + 3 caretakers (9 animals) + land purchases.**
+   Catastrophic: `HIRE` cost is `mult * fib(n_already_hired_today)`, and
+   hands must be re-hired from scratch every day (they disappear
+   overnight). Reaching 18 hires in one day costs **$6,764**, vs. $143 for
+   10 -- the fib curve, not tile space, is the real ceiling on headcount.
+   The run never even reached the caretaker slots (indices 15-17), so
+   `animal_cost` stayed exactly $0, and $3,000 got spent on land for
+   tiles we never needed. This is also why submission_27 -- despite
+   controlling far more land and 10 animals -- only issues ~9-10 HIRE
+   calls/day on average (284 total / 30 days), not dozens: the same fib
+   ceiling applies to it too.
+2. **TARGET_HANDS 10 -> 12 (2 caretakers, 6 animals), no land.** Better,
+   but $376/day in hire cost alone during the ~12-day window before melon
+   first matures (little income yet) burns the $3,000 starting bank
+   before any animal or seed spending is even considered. Hand count
+   collapsed unpredictably once cash ran out, leaving tiles/animals
+   untended some days -> dead crops, escaped animals, compounding losses.
+3. **Kept TARGET_HANDS at 10 (v4's proven $143/day), reallocated 2 of
+   those 10 hands from crop tiles to a second caretaker** (6 animals: 4
+   cow + 2 sheep, one fewer melon tile) **+ a $1,500 cash reserve** so
+   animal purchases can't eat into tomorrow's hire/feed money, **+
+   staggering the second caretaker's animal purchases** by extra days.
+   This got the hire economics right (hand count stayed flat at 10 all
+   game, no more cash collapse) and genuinely raised revenue (milk+wool
+   revenue: $23,133 vs. v4's $14,448; total revenue: ~$44,750 vs. v4's
+   $40,575) -- but **still lost head-to-head, -$3,561 mean profit,
+   REJECTED**. Root cause, found by diffing tile state turn-by-turn: 2 of
+   the second caretaker's 3 animals escaped simultaneously on day 13,
+   well after the cash-crunch window and well after the staggering delay
+   -- i.e. not a money problem at all. The likely cause is the shared
+   hand-spawn mechanic (hands respawn "at the least-crowded shed-adjacent
+   slot" each day, which varies with how many *other* hands are also
+   spawning that day): on a day where that caretaker spawned unusually
+   far from its 3 pastures, it may not have had enough of its 24 turns
+   left to reach and feed all three, missing 2 consecutive days for the
+   same 2 animals. The one-time $400-500 purchase becomes a total loss on
+   escape, which combined with 6 animals' recurring feed cost (~$150-270/
+   day bought via `BUY_PRODUCT`, since growing enough wheat ourselves to
+   self-supply would cost more melon tiles than it's worth) outweighed
+   the extra revenue.
+
+**Net conclusion**: more animals only pays off if they don't escape.
+Fixing that requires either giving the caretaker a spawn-independent
+route (e.g. always reachable from any of the 4 shed-adjacent tiles within
+a turn budget that has slack even on a bad spawn) or accepting fewer
+animals per caretaker so the daily round-trip has more slack. Left for
+the next iteration; `submissions/candidate/main.py` still holds this
+round's (rejected) code and `reports/experiment_history.csv` has the
+exact numbers for both failed attempts.
+
+## Remaining levers (not yet tried)
+
+2. **Land expansion**, once headcount is no longer the constraint it
+   looks like it should be -- v4/v5 both still fit inside the 24-tile NW
+   quadrant, so this hasn't been the actual bottleneck yet.
 3. **Ongoing crops (strawberry/tomato)** and **goose/egg** for further
    income diversification, matching submission_27's mix.
-
-Both animal-count scaling and land expansion were left for the next
-iteration to avoid shipping more unvalidated logic in one pass -- see the
-git log for what was tried and measured each round.

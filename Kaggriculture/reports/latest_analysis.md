@@ -74,3 +74,26 @@ vs. `opponents/submission_27`: deficit narrowed further, from ~9x to ~6x
 (~$28,000 vs. ~$175,000 average across 3 seeds). `opponents/README.md`
 has the full table and the next levers (more animals, land expansion,
 ongoing crops).
+
+## Round 4 (rejected, twice -- baseline unchanged)
+
+Tried scaling from 1 cow + 1 sheep to submission_27's scale (aimed for 6
+animals: 4 cow + 2 sheep). Two tuned attempts, both A/B tested over 10
+real games against the v4 baseline and both **REJECTED**:
+
+- Attempt 1: -$3,557 mean profit. Attempt 2 (added a $1,500 cash reserve
+  + staggered the second caretaker's purchases): -$3,561 mean profit,
+  essentially unchanged.
+
+Revenue actually went *up* both times (total revenue ~$44,750 vs. v4's
+$40,575, milk+wool alone $23,133 vs. $14,448) but costs rose more:
+2 of the second caretaker's 3 animals escaped on day 13 in both attempts
+(traced via a turn-by-turn tile diff -- see `opponents/README.md`'s
+"Round 4" section for the full root-cause analysis), each escape a total
+loss of the $400-500 purchase, on top of ~$150-270/day in ongoing feed
+cost per caretaker group. `submissions/baseline/main.py` is unchanged
+(still v4); `submissions/candidate/main.py` holds this round's rejected
+code for reference. Next attempt needs to fix the escape (likely a
+spawn-position-dependent travel-time shortfall, not a money problem) or
+reduce animals-per-caretaker so the daily round trip has slack even on a
+bad spawn day, before trying to scale animal count further.
