@@ -1,0 +1,51 @@
+{
+  "game_module": "cg.game",
+  "cg_root": "../submission_root",
+  "variant": {
+    "name": "B_C0_fixed",
+    "main": "../examples/variant_B/main.py",
+    "deck": "../examples/variant_B/deck.csv",
+    "watch_globals": [
+      "_opp_mill_seen"
+    ]
+  },
+  "opponents": [
+    {
+      "label": "alakazam",
+      "deck": "../opponents/alakazam.csv",
+      "bot": "greedy",
+      "weight": 35,
+      "is_mill": false
+    },
+    {
+      "label": "lucario",
+      "deck": "../opponents/lucario.csv",
+      "bot": "greedy",
+      "weight": 25,
+      "is_mill": false
+    },
+    {
+      "label": "archaludon_mirror",
+      "deck": "../opponents/archaludon_mirror.csv",
+      "bot": "greedy",
+      "weight": 25,
+      "is_mill": false
+    },
+    {
+      "label": "tusk_mill",
+      "deck": "../opponents/tusk_mill.csv",
+      "bot": "tusk_mill",
+      "weight": 15,
+      "is_mill": true
+    }
+  ],
+  "games": 1000,
+  "minimum_validation_games": 1000,
+  "schedule_seed": 20260719,
+  "max_decisions": 2000,
+  "save_replays": true,
+  "error_policy": "fallback",
+  "output_dir": "../out/B_C0_full_1000",
+  "balance_first_second": true,
+  "balance_max_attempt_multiplier": 10.0
+}

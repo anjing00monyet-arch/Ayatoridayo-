@@ -1,0 +1,5 @@
+engine/cg/
+out/
+*_submission.zip
+**/__pycache__/
+*.pyc

@@ -1,0 +1,53 @@
+name: pokemon-tcg-agent-lab / smoke test
+
+# Runs on every push/PR touching the lab. Deliberately does NOT need the `cg`
+# engine (see PokemonTCG-Agent-Lab/engine/README.md for why it isn't
+# committed here) -- everything below is pure static/offline validation:
+# syntax, deck legality, flag defaults, and the harness's own unit-testable
+# pieces (stats functions, config generation, arm materialization). It will
+# NOT catch a bug in actual game logic; that needs ab-evaluation.yml on a
+# runner that has the engine installed.
+
+on:
+  push:
+    paths:
+      - "PokemonTCG-Agent-Lab/**"
+      - ".github/workflows/pokemon-tcg-smoke-test.yml"
+  pull_request:
+    paths:
+      - "PokemonTCG-Agent-Lab/**"
+
+defaults:
+  run:
+    working-directory: PokemonTCG-Agent-Lab
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate agent sources (syntax, deck legality, flags)
+        run: |
+          python tools/validate_agent.py baseline --expect-flags-off
+          python tools/validate_agent.py candidate
+
+      - name: Compile the harness package
+        run: python -m py_compile harness/harness/*.py harness/*.py
+
+      - name: Compile replay_analyzer and tools
+        run: python -m py_compile replay_analyzer/*.py tools/*.py run_improvement_loop.py
+
+      - name: Preview schedules for every bundled config (no games run)
+        run: |
+          for cfg in harness/configs/*.json; do
+            echo "--- $cfg ---"
+            python harness/seed_schedule.py "$cfg" || true
+          done
+
+      - name: Package a submission zip (does not require cg)
+        run: python tools/package_submission.py candidate --out /tmp/candidate_submission.zip

@@ -1,0 +1,30 @@
+# Human-readable record of what a run is testing and why, kept next to
+# history.csv. Not consumed by run_arms.py directly (it takes CLI flags) --
+# fill one of these in before you kick off a run, then append the outcome
+# to history.csv. Copy this file per experiment if you want to keep them all.
+
+name: a3fix-tusk_mill-900
+hypothesis: >
+  The isolate preset (base/b1/a2/a3, 500 games/arm, all matchups) pinned A3
+  as the arm that breaches the true_self_snipe absolute ceiling on its own
+  (1.47% vs base 0.90%, a3-vs-b1 p=0.0034), not B1 as first suspected. A3
+  stops Ultra Ball/Dusk Ball (Pokemon search) whenever the deck is thin,
+  which likely starves the bench of an expendable body for forced
+  promotions. a3_bench (A3 + ENABLE_A3_BENCH_AWARE) exempts search cards
+  from the stop; a3_d1 pairs A3 with the gate-definition guard instead.
+  Expect a3_bench and/or a3_d1 to bring the snipe rate back near base.
+
+preset: a3fix          # base, a3, a3_bench, a3_d1 -- see harness/run_arms.py --list-arms
+matchup: tusk_mill      # concentrate power where the earlier signal was noisiest (n=75/arm)
+games_per_arm: 900      # ~80% power to detect a 7pp win-rate swing per the earlier sizing note
+schedule_seed: 20260724 # new seed: draw a fresh sample, don't reuse an already-analyzed one
+
+acceptance:
+  # See harness/acceptance_gate.py for the implementation. This experiment's bar:
+  snipe_rate_at_or_below: 0.010   # must clear the mechanism gate's absolute ceiling
+  win_rate_delta_at_least: 0.0    # a3_bench/a3_d1 should not cost win rate to fix the gate
+  crashes: 0
+  illegal_actions: 0
+
+status: planned   # planned | running | done
+result_ref: ""     # fill in the reports/ path or run_arms_report.json once it's run

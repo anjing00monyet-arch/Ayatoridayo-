@@ -1,0 +1,4 @@
+{
+  "_comment": "Populated by reviewer.md's process when a candidate fails harness/acceptance_gate.py. Each entry should record: date, candidate arm, which gate criterion failed, the metric value and its interval, and the disposition (fix attempted / arm dropped / rerun requested).",
+  "regressions": []
+}

@@ -1,0 +1,60 @@
+name: pokemon-tcg-agent-lab / nightly gauntlet
+
+# Same self-hosted-runner requirement as pokemon-tcg-ab-evaluation.yml -- see
+# that file's header and PokemonTCG-Agent-Lab/engine/README.md. This is a
+# template for a scheduled full-scale run (baseline vs candidate across every
+# opponent, high game count), not something that will succeed on the
+# GitHub-hosted default runner. The `schedule` trigger is commented out on
+# purpose so this doesn't silently fail every night until CG_ROOT is wired up
+# -- uncomment it once pokemon-tcg-ab-evaluation.yml has been run manually
+# and confirmed working.
+
+on:
+  workflow_dispatch: {}
+  # schedule:
+  #   - cron: "0 17 * * *"   # ~02:00 JST
+
+defaults:
+  run:
+    working-directory: PokemonTCG-Agent-Lab
+
+jobs:
+  gauntlet:
+    # runs-on: [self-hosted, pokemon-tcg-cg]   # <- set this up, then uncomment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Confirm cg is available
+        run: |
+          if [ -z "${CG_ROOT:-}" ]; then
+            echo "::error::CG_ROOT is not set. See PokemonTCG-Agent-Lab/engine/README.md."
+            exit 1
+          fi
+          python -c "import sys; sys.path.insert(0, '$CG_ROOT'); import cg.game"
+
+      - name: Full gauntlet, baseline vs candidate, all opponents
+        run: |
+          cd harness
+          python run_arms.py --arms baseline,base --games 1000 --cg-root "$CG_ROOT" --out out/nightly
+        env:
+          CG_ROOT: ${{ vars.CG_ROOT }}
+
+      - name: Gate + report
+        run: |
+          python harness/acceptance_gate.py \
+            harness/out/nightly/baseline/summary.json harness/out/nightly/base/summary.json \
+            --out harness/out/nightly/gate_result.json
+          python replay_analyzer/matchup_report.py harness/out/nightly/run_arms_report.json \
+            --out-md reports/latest_report.md --out-csv reports/matchup_matrix.csv
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-gauntlet-output
+          path: |
+            PokemonTCG-Agent-Lab/harness/out/nightly/
+            PokemonTCG-Agent-Lab/reports/

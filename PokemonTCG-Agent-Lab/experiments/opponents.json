@@ -1,0 +1,9 @@
+{
+  "_comment": "Opponent mixture used across the tusk_mill B1/A2/A3/D1 investigation. Weights are relative, not percentages -- run_arms.py normalizes them via exact_weighted_schedule(). Deck CSVs live in agents/opponents_decks/.",
+  "opponents": [
+    { "label": "alakazam", "deck": "agents/opponents_decks/alakazam.csv", "bot": "greedy", "weight": 35, "is_mill": false },
+    { "label": "lucario", "deck": "agents/opponents_decks/lucario.csv", "bot": "greedy", "weight": 25, "is_mill": false },
+    { "label": "archaludon_mirror", "deck": "agents/opponents_decks/archaludon_mirror.csv", "bot": "greedy", "weight": 25, "is_mill": false },
+    { "label": "tusk_mill", "deck": "agents/opponents_decks/tusk_mill.csv", "bot": "tusk_mill", "weight": 15, "is_mill": true }
+  ]
+}

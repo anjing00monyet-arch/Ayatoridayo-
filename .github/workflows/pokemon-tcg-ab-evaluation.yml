@@ -1,0 +1,70 @@
+name: pokemon-tcg-agent-lab / A-B evaluation
+
+# NEEDS A SELF-HOSTED RUNNER WITH THE `cg` ENGINE INSTALLED.
+# This is a template, not a working CI gate yet: GitHub-hosted `ubuntu-latest`
+# runners have no access to the competition's `cg` package (see
+# PokemonTCG-Agent-Lab/engine/README.md -- it is deliberately not committed
+# to this public repo). Point `runs-on` at a self-hosted runner label that
+# has `cg` available at CG_ROOT before this can run for real. Until then,
+# trigger it manually with workflow_dispatch to smoke-test the plumbing on a
+# runner where you've set that up by hand.
+
+on:
+  workflow_dispatch:
+    inputs:
+      games:
+        description: "games per arm"
+        default: "500"
+      matchup:
+        description: "restrict to one opponent (blank = all)"
+        default: ""
+      preset:
+        description: "harness/run_arms.py preset"
+        default: "isolate"
+
+defaults:
+  run:
+    working-directory: PokemonTCG-Agent-Lab
+
+jobs:
+  ab-evaluation:
+    # runs-on: [self-hosted, pokemon-tcg-cg]   # <- set this up, then uncomment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Confirm cg is available (this step is expected to fail until CG_ROOT is wired up)
+        run: |
+          if [ -z "${CG_ROOT:-}" ]; then
+            echo "::error::CG_ROOT is not set. This job needs a self-hosted runner with the" \
+                 "cg engine installed and CG_ROOT pointing at its parent directory. See" \
+                 "PokemonTCG-Agent-Lab/engine/README.md."
+            exit 1
+          fi
+          python -c "import sys; sys.path.insert(0, '$CG_ROOT'); import cg.game"
+
+      - name: Run A/B (baseline vs candidate)
+        run: |
+          cd harness
+          python run_arms.py --preset "${{ inputs.preset }}" \
+            --games "${{ inputs.games }}" \
+            ${{ inputs.matchup != '' && format('--matchup {0}', inputs.matchup) || '' }} \
+            --cg-root "$CG_ROOT"
+        env:
+          CG_ROOT: ${{ vars.CG_ROOT }}
+
+      - name: Check the acceptance gate
+        run: |
+          python harness/acceptance_gate.py \
+            harness/out/run_arms/baseline/summary.json \
+            harness/out/run_arms/base/summary.json \
+            --out harness/out/run_arms/gate_result.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ab-evaluation-output
+          path: PokemonTCG-Agent-Lab/harness/out/run_arms/
