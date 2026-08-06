@@ -61,5 +61,16 @@ baseline vs. candidate) against a real, much stronger public solution
 (`opponents/submission_27`, decoded and analyzed -- see
 `opponents/README.md`): went from a ~53x deficit ($3,504 vs. $186,169) to
 a ~9x deficit (~$20,000 vs. ~$180,000). Real progress, still losing.
-`opponents/README.md` names the two biggest remaining levers (animal
-husbandry for compounding income, land expansion) as the next proposals.
+
+## Round 3 (accepted, promoted to baseline)
+
+Added animal husbandry: a dedicated caretaker (the 10th hired hand) builds
+2 pastures next to the shed, buys/places 1 cow + 1 sheep, and runs a
+daily fetch-wheat -> feed -> care -> harvest -> collect-fertilizer loop.
+A/B tested over 10 real games against the v3 (crop-only) baseline:
+**+$9,935 mean profit, 100% win rate, zero crashes -- ACCEPTED**, promoted.
+
+vs. `opponents/submission_27`: deficit narrowed further, from ~9x to ~6x
+(~$28,000 vs. ~$175,000 average across 3 seeds). `opponents/README.md`
+has the full table and the next levers (more animals, land expansion,
+ongoing crops).

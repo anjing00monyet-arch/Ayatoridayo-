@@ -1,28 +1,29 @@
-"""Baseline v3: multi-unit scale-up.
+"""Baseline v4: adds animal husbandry to the v3 multi-unit scale-up.
 
 Promoted from submissions/candidate/main.py after clearing
-evaluation/acceptance_gate.py against the previous baseline (single-tile
-carrot loop): +$22,433 mean profit, 100% win rate, zero crashes/invalid
-actions over 10 real 720-turn games (see reports/experiment_history.csv).
+evaluation/acceptance_gate.py against v3 (multi-unit crop-only baseline):
++$9,935 mean profit, 100% win rate, zero crashes/invalid actions over 10
+real 720-turn games (see reports/experiment_history.csv).
 
-The single-tile carrot loop never used hired hands, land, or animals --
-93% of turns were idle (see reports/latest_analysis.md). This version
-stations the farmer and a ramping roster of hired hands on
-individual tiles across the starting NW quadrant, each running an
-independent PLANT -> WATER -> HARVEST loop and replanting immediately.
-Most tiles run MELON (high value, ~$250 base, best $/tile/day once
-cycling); a few run WHEAT (cheap, fast 4-day cycle, glut-resistant price
-curve) for early cash flow before melon pays off. Hands are re-hired every
-day (they disappear overnight) and walk back to their assigned tile via
-simple greedy movement; hiring ramps by a few hands/day rather than all at
-once, so melon harvests -- and the eventual replant cycle -- land on
-different days instead of glutting the market in one shot.
+v3 stations the farmer and 9 hired hands on individual crop tiles
+(melon/wheat). This version repurposes the 10th (last) hired
+hand as a dedicated animal caretaker: it builds two pastures right next to
+the shed, buys and places one COW and one SHEEP, and every day fetches
+wheat from the shed to FEED both, plus CARE/HARVEST/COLLECT_FERTILIZER as
+each becomes available. Unlike seeds (auto-available to any unit), FEED
+consumes WHEAT from the *acting unit's own inventory* -- see
+`_apply_unit_action`'s FEED handler in the installed `kaggle_environments`
+package -- so the caretaker must physically carry it from the shed each
+day. Milk/wool are the payoff: once fed, a cow/sheep produces indefinitely
+from a single $400/$500 purchase, unlike crops which need a fresh seed
+every harvest cycle (see opponents/README.md's analysis of why
+opponents/submission_27 runs 8 cows + 2 sheep).
 
-Does not yet buy land or raise animals -- the NW quadrant alone (24 usable
-tiles) comfortably fits TARGET_HANDS=10 + the farmer. See
-opponents/submission_27 for a far more sophisticated public solution
-(scripted 719-step route + land expansion + animals + market-priority
-logic) this was built and tested against.
+The caretaker's per-turn decision is entirely state-driven (derived fresh
+from the current observation every call, no phase counter) so it's
+self-correcting regardless of timing: build pasture -> fetch+place animal
+-> daily feed/care/harvest/collect loop, re-evaluated from scratch each
+turn.
 
 Do not change the `agent(observation) -> action` signature or the action
 return shape -- that is the official Kaggle submission API. See
@@ -32,23 +33,31 @@ from __future__ import annotations
 
 from typing import Any
 
-from game.tables import CROPS, hire_cost
+from game.tables import ANIMALS, CROPS, hire_cost
 
 Observation = dict[str, Any]
 Action = dict[str, Any]
 
 TARGET_HANDS = 10
 HIRE_RAMP_PER_DAY = 3  # stagger hiring so planting/harvest timing spreads out
+CARETAKER_HAND_INDEX = TARGET_HANDS - 1  # last hired hand tends animals, not crops
 
-# Tiles in the starting NW quadrant, nearest-to-shed first; skip (4,4)
-# (shed-adjacent, kept free to avoid any edge-case interaction).
-NW_TILES = sorted(
-    ((x, y) for x in range(5) for y in range(5) if (x, y) != (4, 4)),
-    key=lambda p: abs(p[0] - 4) + abs(p[1] - 4),
+SHED_TILE = (4, 4)  # only shed-adjacent tile guaranteed unlocked from turn 0
+
+# Tiles in the starting NW quadrant, nearest-to-shed first; skip SHED_TILE
+# itself. The first two (closest) are reserved for pastures so the
+# caretaker's daily shed-to-pasture commute stays short; the rest are crop
+# tiles for the farmer + other hands.
+_NW_TILES = sorted(
+    ((x, y) for x in range(5) for y in range(5) if (x, y) != SHED_TILE),
+    key=lambda p: abs(p[0] - SHED_TILE[0]) + abs(p[1] - SHED_TILE[1]),
 )
-# First few assigned units run wheat for early cash flow; the rest run melon.
-CROP_PLAN = ["WHEAT"] * 3 + ["MELON"] * (len(NW_TILES) - 3)
-SELLABLE = ("WHEAT", "MELON", "CARROT", "STRAWBERRY", "TOMATO")
+ANIMAL_TILES = _NW_TILES[:2]
+ANIMAL_PLAN = ["COW", "SHEEP"]  # -> MILK, WOOL; two different animals avoids qty bookkeeping
+CROP_TILES = _NW_TILES[2:]
+# First few assigned crop units run wheat for early cash flow; the rest run melon.
+CROP_PLAN = ["WHEAT"] * 3 + ["MELON"] * (len(CROP_TILES) - 3)
+SELLABLE = ("WHEAT", "MELON", "CARROT", "STRAWBERRY", "TOMATO", "MILK", "WOOL")
 
 _STATE = {0: {}, 1: {}}
 
@@ -69,12 +78,12 @@ def _game_state(seat: int, step: int, day: int) -> dict[str, Any]:
     return game
 
 
-def _assign(game: dict[str, Any], unit_id: Any) -> tuple[tuple[int, int] | None, str | None]:
+def _assign_crop(game: dict[str, Any], unit_id: Any) -> tuple[tuple[int, int] | None, str | None]:
     if unit_id not in game["unit_tile"]:
         index = len(game["unit_tile"])
-        if index >= len(NW_TILES):
+        if index >= len(CROP_TILES):
             return None, None
-        game["unit_tile"][unit_id] = NW_TILES[index]
+        game["unit_tile"][unit_id] = CROP_TILES[index]
         game["unit_crop"][unit_id] = CROP_PLAN[index]
     return game["unit_tile"][unit_id], game["unit_crop"][unit_id]
 
@@ -85,6 +94,84 @@ def _move_toward(pos: tuple[int, int], target: tuple[int, int]) -> str:
     if x != tx:
         return "EAST" if tx > x else "WEST"
     return "SOUTH" if ty > y else "NORTH"
+
+
+def _crop_tile_action(farm, day, pos, target, crop, available_seeds, seed_shortfall):
+    if pos != target:
+        return [_move_toward(pos, target)]
+    tile = farm["tiles"][target[1]][target[0]]
+    if tile is None:
+        if available_seeds.get(crop, 0) > 0:
+            available_seeds[crop] -= 1
+            return ["PLANT", crop]
+        seed_shortfall[crop] = seed_shortfall.get(crop, 0) + 1
+        return ["PASS"]
+    if isinstance(tile, dict) and tile.get("kind") == "PLANT" and tile.get("crop") == crop:
+        age = day - tile["planted_day"]
+        if age >= CROPS[crop]["max_yield_day"]:
+            return ["HARVEST"]
+        if not tile.get("watered_today"):
+            return ["WATER"]
+        return ["PASS"]
+    if isinstance(tile, dict) and tile.get("kind") == "WEED":
+        return ["DIG"]
+    return ["PASS"]
+
+
+def _caretaker_action(farm, private, pos, unit_inventory):
+    """State-driven: derives the caretaker's next move purely from current
+    tile/inventory state, checked in priority order. Self-correcting --
+    no memory of "where it was headed" needed.
+    """
+    tiles = farm["tiles"]
+    wheat_held = unit_inventory.get("WHEAT", 0)
+
+    # 1. Build any un-built pasture.
+    for tx, ty in ANIMAL_TILES:
+        if tiles[ty][tx] is None:
+            if pos != (tx, ty):
+                return [_move_toward(pos, (tx, ty))]
+            return ["BUILD_PASTURE"]
+
+    # 2. Place any animal that's been bought but isn't on its pasture yet.
+    for (tx, ty), animal in zip(ANIMAL_TILES, ANIMAL_PLAN):
+        tile = tiles[ty][tx]
+        if isinstance(tile, dict) and tile.get("kind") == "PASTURE" and not tile.get("animal"):
+            if unit_inventory.get(animal, 0) > 0:
+                if pos != (tx, ty):
+                    return [_move_toward(pos, (tx, ty))]
+                return ["PLACE", animal]
+            if pos != SHED_TILE:
+                return [_move_toward(pos, SHED_TILE)]
+            return ["PICKUP", animal, 1]
+
+    # 3. Daily loop: feed first (basic needs), then care, then collect.
+    for (tx, ty), animal in zip(ANIMAL_TILES, ANIMAL_PLAN):
+        tile = tiles[ty][tx]
+        if not (isinstance(tile, dict) and tile.get("animal")):
+            continue
+        if not tile.get("fed_today"):
+            if wheat_held > 0:
+                if pos != (tx, ty):
+                    return [_move_toward(pos, (tx, ty))]
+                return ["FEED"]
+            if pos != SHED_TILE:
+                return [_move_toward(pos, SHED_TILE)]
+            return ["PICKUP", "WHEAT", len(ANIMAL_PLAN)]
+        if not tile.get("cared_today"):
+            if pos != (tx, ty):
+                return [_move_toward(pos, (tx, ty))]
+            return ["CARE"]
+        if tile.get("yield_units", 0) > 0:
+            if pos != (tx, ty):
+                return [_move_toward(pos, (tx, ty))]
+            return ["HARVEST"]
+        if tile.get("fertilizer_available"):
+            if pos != (tx, ty):
+                return [_move_toward(pos, (tx, ty))]
+            return ["COLLECT_FERTILIZER"]
+
+    return ["PASS"]
 
 
 def agent(observation: Observation) -> Action:
@@ -100,6 +187,8 @@ def agent(observation: Observation) -> Action:
     step = observation.get("step", 0)
     seeds = private.get("seeds", {})
     shed = private.get("shed", {})
+    inventories = private.get("inventories", []) or []
+    market_prices = (observation.get("market") or {}).get("prices", {}) or {}
     money = farm["money"]
 
     game = _game_state(player, step, day)
@@ -112,35 +201,16 @@ def agent(observation: Observation) -> Action:
     seed_shortfall: dict[str, int] = {}
     unit_ops: list[list[Any]] = []
 
-    for unit_id, pos in zip(unit_ids, unit_positions):
-        target, crop = _assign(game, unit_id)
+    for index, (unit_id, pos) in enumerate(zip(unit_ids, unit_positions)):
+        if unit_id == CARETAKER_HAND_INDEX:
+            inv = inventories[index] if index < len(inventories) else {}
+            unit_ops.append(_caretaker_action(farm, private, pos, inv))
+            continue
+        target, crop = _assign_crop(game, unit_id)
         if target is None:
             unit_ops.append(["PASS"])
             continue
-        if pos != target:
-            unit_ops.append([_move_toward(pos, target)])
-            continue
-
-        tile = farm["tiles"][target[1]][target[0]]
-        if tile is None:
-            if available_seeds.get(crop, 0) > 0:
-                available_seeds[crop] -= 1
-                unit_ops.append(["PLANT", crop])
-            else:
-                seed_shortfall[crop] = seed_shortfall.get(crop, 0) + 1
-                unit_ops.append(["PASS"])
-        elif isinstance(tile, dict) and tile.get("kind") == "PLANT" and tile.get("crop") == crop:
-            age = day - tile["planted_day"]
-            if age >= CROPS[crop]["max_yield_day"]:
-                unit_ops.append(["HARVEST"])
-            elif not tile.get("watered_today"):
-                unit_ops.append(["WATER"])
-            else:
-                unit_ops.append(["PASS"])
-        elif isinstance(tile, dict) and tile.get("kind") == "WEED":
-            unit_ops.append(["DIG"])
-        else:
-            unit_ops.append(["PASS"])
+        unit_ops.append(_crop_tile_action(farm, day, pos, target, crop, available_seeds, seed_shortfall))
 
     hire_orders: list[list[Any]] = []
     if hour == 0 and len(hands) < game["ramp_target"]:
@@ -154,7 +224,16 @@ def agent(observation: Observation) -> Action:
             spend += cost
             hire_orders.append(["HIRE"])
 
-    sell_orders = [["SELL", item, shed[item]] for item in SELLABLE if shed.get(item, 0) > 0]
+    # Reserve enough wheat in the shed to feed both animals today before
+    # selling the rest; top up from the market if our own crop isn't enough.
+    wheat_reserve = len(ANIMAL_PLAN)
+    wheat_in_shed = shed.get("WHEAT", 0)
+    wheat_sellable = max(0, wheat_in_shed - wheat_reserve)
+    sell_orders = [
+        ["SELL", item, (wheat_sellable if item == "WHEAT" else shed.get(item, 0))]
+        for item in SELLABLE
+        if (wheat_sellable if item == "WHEAT" else shed.get(item, 0)) > 0
+    ]
 
     buy_orders: list[list[Any]] = []
     remaining_money = money
@@ -164,6 +243,24 @@ def agent(observation: Observation) -> Action:
         if affordable > 0:
             buy_orders.append(["BUY_SEED", crop, affordable])
             remaining_money -= affordable * cost_each
+
+    for (tx, ty), animal in zip(ANIMAL_TILES, ANIMAL_PLAN):
+        tile = farm["tiles"][ty][tx]
+        already_have = (isinstance(tile, dict) and tile.get("animal") == animal) or shed.get(
+            animal, 0
+        ) > 0 or any(inv.get(animal, 0) > 0 for inv in inventories)
+        if not already_have:
+            cost = ANIMALS[animal]["cost"]
+            if remaining_money >= cost:
+                buy_orders.append(["BUY_ANIMAL", animal, 1])
+                remaining_money -= cost
+
+    if wheat_in_shed < wheat_reserve:
+        needed = wheat_reserve - wheat_in_shed
+        cost_each = market_prices.get("WHEAT", CROPS["WHEAT"]["seed"])
+        affordable = min(needed, int(remaining_money // max(1, cost_each)))
+        if affordable > 0:
+            buy_orders.append(["BUY_PRODUCT", "WHEAT", affordable])
 
     market = (hire_orders + sell_orders + buy_orders)[:10]
 

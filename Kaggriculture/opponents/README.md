@@ -33,37 +33,36 @@ reversible with the standard library) to understand its strategy:
   284 HIRE calls (a large, sustained hand roster), and 2 BUY_LAND buys
   (day ~7 and ~11, expanding to 3 of the 4 quadrants).
 
-## Benchmark result
+## Benchmark results
 
-`submissions/baseline/main.py` (v3: 10 hired hands + farmer, each
-permanently tending one melon/wheat tile in the starting quadrant, no
-land purchase or animals) vs. `opponents/submission_27/main.py`, 3 seeds,
-720-turn games:
+vs. `opponents/submission_27/main.py`, 3 seeds, 720-turn games:
 
-| seed | our final bank | submission_27 final bank |
-|---|---|---|
-| 0 | $19,892 | $174,326 |
-| 1 | $20,073 | $188,359 |
-| 2 | $19,950 | $188,848 |
+| version | our final bank | submission_27 final bank | deficit |
+|---|---|---|---|
+| single-tile carrot loop (pre-session baseline) | $3,504 | $186,169 | ~53x |
+| v3: multi-unit crop scale-up (10 hands, melon/wheat) | ~$19,900-20,100 | ~$174,000-189,000 | ~9x |
+| v4: v3 + cow/sheep husbandry | ~$27,600-29,700 | ~$163,000-196,000 | ~6x |
 
-For comparison, the single-tile carrot loop (the baseline before this
-session) scored ~$3,504 against the same opponent -- so the multi-unit
-scale-up closed the gap from a ~53x deficit to a ~9x deficit, but does not
-win. The decoded schedule above points at the two biggest remaining
-levers, in rough order of expected impact:
+Each round closed the gap further but none has won yet. The decoded
+schedule points at the remaining levers, in rough order of expected
+impact:
 
-1. **Animal husbandry** (cow/sheep -> milk/wool): compounding income from
-   one $400-500 purchase instead of paying a fresh seed cost every
-   harvest cycle. Not yet implemented here -- it requires a unit to
-   `PICKUP` the animal from the shed (animals bought via `BUY_ANIMAL`
-   land in the shed, not directly on a tile) and carry `WHEAT` in
-   inventory daily to `FEED` (unlike seeds, wheat for feeding is **not**
-   auto-available -- see `_apply_unit_action`'s `FEED` handler in the
-   installed `kaggle_environments` package), i.e. a genuine daily
-   shed-commute loop per animal, not a simple PLANT/WATER/HARVEST cycle.
-2. **Land expansion**: more tiles support more hands productively; we
-   have headroom in the current 24-tile NW quadrant before this matters.
+1. ~~**Animal husbandry** (cow/sheep -> milk/wool)~~ -- **done in v4**:
+   compounding income from one $400-500 purchase instead of paying a
+   fresh seed cost every harvest cycle. Required a dedicated caretaker
+   unit to `PICKUP` the animal from the shed (animals bought via
+   `BUY_ANIMAL` land in the shed, not directly on a tile) and physically
+   carry `WHEAT` in inventory daily to `FEED` (unlike seeds, wheat for
+   feeding is **not** auto-available -- see `_apply_unit_action`'s `FEED`
+   handler in the installed `kaggle_environments` package).
+2. **More animals / land expansion**: v4 only runs 1 cow + 1 sheep with 1
+   caretaker; submission_27 runs 8 cows + 2 sheep. A second caretaker (or
+   one caretaker tending several animals per day, since the daily
+   feed/care/harvest loop only takes a handful of turns) plus buying land
+   for more pasture space is the next-highest-leverage lever.
+3. **Ongoing crops (strawberry/tomato)** and **goose/egg** for further
+   income diversification, matching submission_27's mix.
 
-Neither was implemented in this pass to avoid shipping unvalidated,
-half-tested logic under time pressure -- see the task history / git log
-for the reasoning. They're the natural next candidate proposals.
+Both animal-count scaling and land expansion were left for the next
+iteration to avoid shipping more unvalidated logic in one pass -- see the
+git log for what was tried and measured each round.
