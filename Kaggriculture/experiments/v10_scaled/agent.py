@@ -34,7 +34,20 @@ Observation = dict[str, Any]
 Action = dict[str, Any]
 
 TARGET_HANDS = 14
-HIRE_RAMP_PER_DAY = 5  # Konstantin03's real games open with an immediate burst of 5 hires, not a slow ramp
+# Two-phase ramp, calibrated against Konstantin03's real match logs (noon
+# hand counts sampled directly): they hover around 5 hands through day 6
+# (money as low as $2-30 some days -- clearly deliberately lean before
+# crops/animals mature enough to pay for a bigger roster), then scale up
+# to 14 over days 7-11 once real revenue exists. A first version ramped
+# straight to 14 by day 2 (misreading "5 immediate hires on day 1" as "+5
+# hands every day") -- 14 hands costs $986/day in HIRE fees alone (fib-cost
+# scales steeply), which no crop or animal here can possibly repay before
+# its first harvest (melon: 12 days; cow/sheep: 6-8 days), so the economy
+# never recovered: money crashed to ~$0 by day 3 and stayed there for the
+# rest of the game, killing all 10 crop tiles and 2 animals from neglect.
+_RAMP_PHASE1_CAP = 5
+_RAMP_PHASE2_DAY = 7
+HIRE_RAMP_PER_DAY = 2
 ANIMAL_CARETAKER_COUNT = 4
 CROP_TENDER_HAND_COUNT = TARGET_HANDS - ANIMAL_CARETAKER_COUNT  # 10 hands + farmer = 11 crop tenders
 CASH_RESERVE = 0
@@ -88,7 +101,8 @@ def _game_state(seat: int, step: int, day: int) -> dict[str, Any]:
     game["last_step"] = step
     if day > game["ramp_day"]:
         game["ramp_day"] = day
-        game["ramp_target"] = min(TARGET_HANDS, game["ramp_target"] + HIRE_RAMP_PER_DAY)
+        cap = TARGET_HANDS if day >= _RAMP_PHASE2_DAY else _RAMP_PHASE1_CAP
+        game["ramp_target"] = min(cap, game["ramp_target"] + HIRE_RAMP_PER_DAY)
     return game
 
 
@@ -271,7 +285,10 @@ def agent(observation: Observation) -> Action:
     if not game["land_bought"]:
         if "NE" in farm.get("unlocked_quadrants", []):
             game["land_bought"] = True
-        elif money >= 1000:
+        # Match Konstantin03's real timing (~day 7) rather than spending
+        # $1,000 during the lean bootstrap phase, before crops/animals
+        # have started paying for themselves.
+        elif day >= _RAMP_PHASE2_DAY and money >= 1000:
             land_orders.append(["BUY_LAND"])
 
     active_caretakers = sum(1 for idx in CARETAKER_HAND_INDICES if idx < len(hands))
