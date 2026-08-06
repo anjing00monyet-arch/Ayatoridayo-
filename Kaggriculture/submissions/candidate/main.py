@@ -1,4 +1,5 @@
-"""Candidate: opponents/submission_29 + per-item sell-timing offset.
+"""Candidate: opponents/submission_29 + per-item sell-timing offset
++ retry-on-shortfall for HIRE/BUY_ANIMAL/BUY_SEED.
 
 Built directly on a real, stronger public submission (submission_29)
 instead of continuing our own v9 lineage -- see reports/latest_analysis.md
@@ -32,6 +33,20 @@ the recorded schedule) so our sell cadence for commonly-produced items no
 longer lines up turn-for-turn with an unmodified copy of this same script
 -- letting some of our sales land in turns where a near-mirror opponent
 isn't also flooding the same item.
+
+First cut at this shift regressed badly in validation (mirror match mean
+$54,625 vs. baseline's $151,550) even after fixing two real bugs (negative
+offsets selling before the harvest that produces the item, a fixed sell
+landing on a turn already at kaggriculture's 10-order cap and getting
+silently truncated). Root cause, confirmed by tracing a real game: delaying
+a sale delays the cash it brings in, and HIRE/BUY_ANIMAL/BUY_SEED have
+fixed costs that simply fail with no retry in the real env if money is
+short that exact turn -- one seed ended with 2 fewer live sheep (2 empty
+pastures) than the unmodified baseline on the identical matchup, from a
+single missed BUY_ANIMAL the frozen script never got a chance to redo.
+`_purchase_retry` (below `agent`) fixes this directly: pulls those three
+order types out of the turn's action, checks live affordability, and
+queues any shortfall to retry on later turns instead of losing it.
 
 Original docstring, preserved:
 
@@ -668,6 +683,131 @@ def _terminal_market(obs, action):
     return action
 
 
+_PURCHASE_COST = {
+    ("BUY_ANIMAL", "GOOSE"): 300,
+    ("BUY_ANIMAL", "COW"): 400,
+    ("BUY_ANIMAL", "SHEEP"): 500,
+    ("BUY_SEED", "WHEAT"): 10,
+    ("BUY_SEED", "CARROT"): 20,
+    ("BUY_SEED", "TOMATO"): 50,
+    ("BUY_SEED", "STRAWBERRY"): 100,
+    ("BUY_SEED", "MELON"): 80,
+}
+_PURCHASE_STATE = {0: {"queue": []}, 1: {"queue": []}}
+
+
+def _fib(n):
+    a, b = 1, 1
+    for _ in range(n):
+        a, b = b, a + b
+    return a
+
+
+def _hire_cost(n_already_today):
+    return _fib(max(0, int(n_already_today)))
+
+
+def _emit_purchase(op, item, qty):
+    if op == "HIRE":
+        return [["HIRE"] for _ in range(qty)]
+    return [[op, item, qty]]
+
+
+def _purchase_retry(obs, action, step):
+    """HIRE/BUY_ANIMAL/BUY_SEED have fixed per-unit costs and, in the real
+    env, simply no-op if money is short that exact turn -- a frozen
+    script has no way to notice or recover, so one bad cash-flow moment
+    (e.g. `_shift_sell_schedule` delaying a sale later than the recording
+    assumed) permanently loses that hire/animal/seed for the rest of the
+    game. Confirmed with a real trace: an early version of the sell-shift
+    candidate ended one seed with 2 fewer live sheep (2 empty pastures)
+    than the unmodified baseline on the identical matchup, tracing back
+    to a missed BUY_ANIMAL -- about a third of that version's profit gap.
+
+    This pulls HIRE/BUY_ANIMAL/BUY_SEED out of the turn's action, checks
+    live affordability (money and `hires_today` from the observation, not
+    the recording) before submitting them, and queues whatever's short
+    (fully or partially) to retry on later turns once money recovers,
+    instead of letting the real env silently drop it.
+    """
+    seat = 1 if int(_get(obs, "player", 0) or 0) == 1 else 0
+    state = _PURCHASE_STATE[seat]
+    if step == 0:
+        state["queue"] = []
+    queue = state["queue"]
+
+    farms = list(_get(obs, "farms", []) or [])
+    farm = farms[seat] if seat < len(farms) else {}
+    money = float(_get(farm, "money", 0) or 0)
+    hires_today = int(_get(farm, "hires_today", 0) or 0)
+
+    passthrough = []
+    fresh = []
+    for order in (action.get("market") or []):
+        if isinstance(order, list) and order and order[0] == "HIRE":
+            fresh.append(("HIRE", None, 1))
+        elif isinstance(order, list) and len(order) >= 3 and order[0] in ("BUY_ANIMAL", "BUY_SEED"):
+            try:
+                qty = int(order[2])
+            except (TypeError, ValueError):
+                passthrough.append(order)
+                continue
+            fresh.append((order[0], order[1], qty))
+        else:
+            passthrough.append(order)
+
+    def spend(op, item, qty):
+        nonlocal money, hires_today
+        if op == "HIRE":
+            n = 0
+            for _ in range(qty):
+                cost = _hire_cost(hires_today)
+                if money < cost:
+                    break
+                money -= cost
+                hires_today += 1
+                n += 1
+            return n
+        cost = _PURCHASE_COST.get((op, item))
+        if not cost:
+            return qty
+        n = min(qty, int(money // cost))
+        money -= n * cost
+        return n
+
+    room = max(0, 10 - len(passthrough))
+    granted = []
+    remaining_queue = []
+
+    def process(op, item, qty):
+        nonlocal room
+        if room <= 0:
+            remaining_queue.append((op, item, qty))
+            return
+        qty_capped = min(qty, room) if op == "HIRE" else qty
+        n = spend(op, item, qty_capped)
+        if n > 0:
+            granted.append((op, item, n))
+            room -= n if op == "HIRE" else 1
+        leftover = qty - n
+        if leftover > 0:
+            remaining_queue.append((op, item, leftover))
+
+    # Backlog first (oldest shortfalls), using live money/hires_today, then
+    # this turn's own fresh orders with whatever's left.
+    for op, item, qty in queue:
+        process(op, item, qty)
+    for op, item, qty in fresh:
+        process(op, item, qty)
+
+    state["queue"] = remaining_queue
+    market = list(passthrough)
+    for op, item, qty in granted:
+        market.extend(_emit_purchase(op, item, qty))
+    action["market"] = market[:10]
+    return action
+
+
 def agent(obs):
     try:
         step = min(max(0, int(_get(obs, "step", 0) or 0)), len(_ACTIONS) - 1)
@@ -676,6 +816,7 @@ def agent(obs):
         action = _preempt_action(obs, action, step)
         if step == 718:
             action = _terminal_market(obs, action)
+        action = _purchase_retry(obs, action, step)
         return _align_hands(action, obs)
     except Exception:
         seat = 1 if int(_get(obs, "player", 0) or 0) == 1 else 0
