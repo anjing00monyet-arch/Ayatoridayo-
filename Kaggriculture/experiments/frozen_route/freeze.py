@@ -60,35 +60,40 @@ def _tile_at(farm: dict[str, Any], pos) -> Any:
         return "LOCKED"
 
 
-def _needs_water(tile: Any) -> bool:
-    """True if standing on a live crop that hasn't been watered today --
-    missing water twice in a row kills the crop (turns it into a WEED),
-    and a different game's random weed spawns elsewhere on the board can
-    shift an actor's movement enough that the recorded script waters the
-    wrong tile at the wrong time. Watering an already-watered tile is a
-    guaranteed no-op in the real env, so this check is safe to run every
-    turn regardless of what the recording intended here.
-    """
-    return isinstance(tile, dict) and tile.get("kind") == "PLANT" and not tile.get("watered_today", False)
-
-
-def _needs_urgent_harvest(tile: Any, step: int) -> bool:
-    """True if standing on a crop past its harvest deadline that still
-    holds yield -- past `max_lifespan_step` the crop decays by 1 unit
-    every 2 turns until it dies (becomes a WEED), so a script that
-    arrives late (due to any earlier desync) needs to harvest immediately
-    rather than follow whatever it originally had scheduled for this turn.
-    """
-    if not (isinstance(tile, dict) and tile.get("kind") == "PLANT"):
-        return False
-    mls = tile.get("max_lifespan_step", -1)
-    return tile.get("yield_units", 0) > 0 and mls >= 0 and step >= mls
+def _trace_actor_action(actions: list[dict[str, Any]], step: int, actor) -> list[Any]:
+    trace = actions[min(max(int(step), 0), len(actions) - 1)] or {}
+    if actor == "farmer":
+        return list(trace.get("farmer") or ["PASS"])
+    hands = trace.get("hands", []) or []
+    return list(hands[actor] if actor < len(hands) else ["PASS"])
 
 
 def make_frozen_agent(actions: list[dict[str, Any]]):
     """Returns an `agent(observation)` that replays `actions` by step
     index, digging out and retrying any PLANT/BUILD_PASTURE that lands on
     a weed the recording didn't have.
+
+    A DIG-then-retry costs an actor one extra turn versus the recording,
+    which -- if left uncorrected -- permanently shifts every later
+    scripted move for that actor by one step for the rest of the game
+    (movement is a sequence of relative NORTH/SOUTH/EAST/WEST commands,
+    so a single dropped or duplicated turn desyncs position forever, not
+    just for that one interaction). This cost a validated 15-seed run
+    dearly (mean $62,971 -> $38,743, dead crops 1/15 -> 15/15) when an
+    earlier fix here tried to patch the *symptom* (an unwatered crop
+    under an actor's feet) instead of the *cause*: it clobbered movement
+    commands for actors merely passing through a tile, with no way to
+    resync afterward.
+
+    The technique below -- lifted from decoding a real competitor
+    submission's frozen route (submission_29) -- fixes the cause: after
+    the single retry (age 1), it spends `WEED_REPLAY_STEPS` further turns
+    replaying the action recorded one step *earlier* than the current
+    step for that actor, i.e. catching up the whole one-step backlog the
+    interruption created, before reverting to playing the script exactly
+    on-index again. The actor loses exactly one of its originally
+    recorded actions total (absorbed within the catch-up window), never
+    an open-ended drift.
     """
     weed_state: dict[int, dict[str, Any]] = {0: {}, 1: {}}
 
@@ -106,7 +111,9 @@ def make_frozen_agent(actions: list[dict[str, Any]]):
         ops = [action.get("farmer", ["PASS"]), *(action.get("hands") or [])]
         active = game["active"]
 
-        # Retry any intent that's been waiting since a previous DIG.
+        # Retry any intent that's been waiting since a previous DIG, then
+        # spend the rest of the catch-up window replaying the one-step-
+        # earlier action so the actor re-syncs to the script's step index.
         for actor, pending in list(active.items()):
             index = 0 if actor == "farmer" else int(actor) + 1
             if index >= len(ops):
@@ -115,7 +122,9 @@ def make_frozen_agent(actions: list[dict[str, Any]]):
             age = step - pending["start"]
             if age == 1:
                 ops[index] = list(pending["intended"])
-            elif age > WEED_REPLAY_STEPS:
+            elif 2 <= age <= 1 + WEED_REPLAY_STEPS:
+                ops[index] = _trace_actor_action(actions, step - 1, actor)
+            else:
                 active.pop(actor, None)
 
         # Detect new weed-blocked intents.
@@ -130,22 +139,6 @@ def make_frozen_agent(actions: list[dict[str, Any]]):
                 continue
             active[actor] = {"start": step, "intended": list(op)}
             ops[index] = ["DIG"]
-
-        # Crop-safety net: react to the *real* board state under each actor's
-        # feet, not just the recorded intent -- catches watering/harvest
-        # timing drift that a scripted PLANT/BUILD weed-dodge alone can't,
-        # e.g. an already-planted crop the script assumed was watered on a
-        # different turn than it actually needs to be in this game's replay.
-        # A WEED tile (mid weed-repair above) never matches either check, so
-        # this never fights the retry logic for the same actor+turn.
-        for index, pos in enumerate(positions):
-            if index >= len(ops):
-                break
-            tile = _tile_at(farm, pos)
-            if _needs_water(tile):
-                ops[index] = ["WATER"]
-            elif _needs_urgent_harvest(tile, step):
-                ops[index] = ["HARVEST"]
 
         action["farmer"] = ops[0] if ops else ["PASS"]
         action["hands"] = ops[1:]
