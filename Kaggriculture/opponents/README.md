@@ -101,19 +101,47 @@ sheep. Three attempts, each measured head-to-head against v4 over 10 real
    self-supply would cost more melon tiles than it's worth) outweighed
    the extra revenue.
 
-**Net conclusion**: more animals only pays off if they don't escape.
-Fixing that requires either giving the caretaker a spawn-independent
-route (e.g. always reachable from any of the 4 shed-adjacent tiles within
-a turn budget that has slack even on a bad spawn) or accepting fewer
-animals per caretaker so the daily round-trip has more slack. Left for
-the next iteration; `submissions/candidate/main.py` still holds this
-round's (rejected) code and `reports/experiment_history.csv` has the
-exact numbers for both failed attempts.
+4. **Fixed the actual escape bug** (attempt 3's code, logic only, no
+   economic changes): the caretaker checked "place a new animal" *before*
+   "feed animals I already have". Whenever one slot's purchase was
+   delayed for *any* reason (the cash reserve, purchase-order timing --
+   nothing to do with spawn position, that theory in the previous version
+   of this section was wrong), the caretaker got stuck retrying
+   PICKUP/PLACE for the pending slot every single turn and never reached
+   the daily feed loop for its other, already-placed animals -- which
+   then starved. Confirmed via `_caretaker_action(farm, pos, inv, ...)`
+   called directly against the exact game state at the turn in question.
+   Reordered to feed-existing-first; **`escaped_animals` dropped to 0,
+   `animal_cost` landed exactly at the expected $2,600 (no replacement
+   purchases)** -- but mean profit vs. v4 got *worse*, -$4,870.
+
+**Real net conclusion**, now isolated from both bugs: with animals never
+escaping, milk+wool net profit (revenue minus feed minus purchase) was
+**higher** in this version than in v4 ($13,808 vs. $11,492) -- animal
+husbandry itself scales fine. The trade made to fund the second
+caretaker -- one fewer melon tile -- was the actual loss: that tile was
+worth ~$6,943 in melon revenue over the game, more than double what the
+extra animals net. **Melon is worth more per hand than a second
+caretaker's animals, given animals' recurring feed cost.** More animals
+only pays if it doesn't cost a crop tile to get them.
+
+`submissions/baseline/main.py` is still v4 (unchanged); this round's
+bug-fixed-but-still-rejected code is in `submissions/candidate/main.py`
+for reference, and `reports/experiment_history.csv` has all three
+attempts' numbers.
 
 ## Remaining levers (not yet tried)
 
+1. **Give the farmer dual duty** instead of dedicating a full hand to a
+   second caretaker: the farmer is persistent (no daily re-hire/re-walk)
+   and, per the very first analysis in this repo, idle 93% of the time.
+   Having it handle a couple of animals *in addition to* its own crop
+   tile -- crop action when the crop needs something concrete, animal
+   care otherwise -- would add animals without sacrificing hire budget
+   or a melon tile. Needs care: the farmer must never let animal-tending
+   travel cause it to miss its own crop's daily watering.
 2. **Land expansion**, once headcount is no longer the constraint it
-   looks like it should be -- v4/v5 both still fit inside the 24-tile NW
-   quadrant, so this hasn't been the actual bottleneck yet.
+   looks like it should be -- v3/v4/v5 all still fit inside the 24-tile
+   NW quadrant, so this hasn't been the actual bottleneck yet.
 3. **Ongoing crops (strawberry/tomato)** and **goose/egg** for further
    income diversification, matching submission_27's mix.

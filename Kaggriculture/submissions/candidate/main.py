@@ -144,6 +144,15 @@ def _caretaker_action(farm, pos, unit_inventory, my_tiles, my_plan):
     """State-driven: derives this caretaker's next move purely from current
     tile/inventory state for its own group of animals, checked in priority
     order. Self-correcting -- no memory of "where it was headed" needed.
+
+    Feeding animals *already* placed is checked before placing a *new*
+    one. An earlier version checked "place new animal" first: whenever
+    one slot's animal purchase was delayed (e.g. by the cash reserve, or
+    simply market-order timing), the caretaker got stuck every single
+    turn trying to fetch/place that pending animal and never reached the
+    daily feed loop for the animals it already had -- which starved and
+    escaped, a total loss of that purchase. See opponents/README.md's
+    "Round 4" section for the real numbers this caused.
     """
     tiles = farm["tiles"]
     wheat_held = unit_inventory.get("WHEAT", 0)
@@ -155,19 +164,8 @@ def _caretaker_action(farm, pos, unit_inventory, my_tiles, my_plan):
                 return [_move_toward(pos, (tx, ty))]
             return ["BUILD_PASTURE"]
 
-    # 2. Place any animal that's been bought but isn't on its pasture yet.
-    for (tx, ty), animal in zip(my_tiles, my_plan):
-        tile = tiles[ty][tx]
-        if isinstance(tile, dict) and tile.get("kind") == "PASTURE" and not tile.get("animal"):
-            if unit_inventory.get(animal, 0) > 0:
-                if pos != (tx, ty):
-                    return [_move_toward(pos, (tx, ty))]
-                return ["PLACE", animal]
-            if pos != SHED_TILE:
-                return [_move_toward(pos, SHED_TILE)]
-            return ["PICKUP", animal, 1]
-
-    # 3. Daily loop: feed first (basic needs), then care, then collect.
+    # 2. Daily loop for animals I already have: feed first (basic needs),
+    # then care, then collect. Takes priority over placing a new animal.
     for (tx, ty), animal in zip(my_tiles, my_plan):
         tile = tiles[ty][tx]
         if not (isinstance(tile, dict) and tile.get("animal")):
@@ -192,6 +190,19 @@ def _caretaker_action(farm, pos, unit_inventory, my_tiles, my_plan):
             if pos != (tx, ty):
                 return [_move_toward(pos, (tx, ty))]
             return ["COLLECT_FERTILIZER"]
+
+    # 3. Only once every existing animal's daily needs are met: place any
+    # animal that's been bought but isn't on its pasture yet.
+    for (tx, ty), animal in zip(my_tiles, my_plan):
+        tile = tiles[ty][tx]
+        if isinstance(tile, dict) and tile.get("kind") == "PASTURE" and not tile.get("animal"):
+            if unit_inventory.get(animal, 0) > 0:
+                if pos != (tx, ty):
+                    return [_move_toward(pos, (tx, ty))]
+                return ["PLACE", animal]
+            if pos != SHED_TILE:
+                return [_move_toward(pos, SHED_TILE)]
+            return ["PICKUP", animal, 1]
 
     return ["PASS"]
 

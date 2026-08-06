@@ -87,13 +87,29 @@ real games against the v4 baseline and both **REJECTED**:
 
 Revenue actually went *up* both times (total revenue ~$44,750 vs. v4's
 $40,575, milk+wool alone $23,133 vs. $14,448) but costs rose more:
-2 of the second caretaker's 3 animals escaped on day 13 in both attempts
-(traced via a turn-by-turn tile diff -- see `opponents/README.md`'s
-"Round 4" section for the full root-cause analysis), each escape a total
-loss of the $400-500 purchase, on top of ~$150-270/day in ongoing feed
-cost per caretaker group. `submissions/baseline/main.py` is unchanged
-(still v4); `submissions/candidate/main.py` holds this round's rejected
-code for reference. Next attempt needs to fix the escape (likely a
-spawn-position-dependent travel-time shortfall, not a money problem) or
-reduce animals-per-caretaker so the daily round trip has slack even on a
-bad spawn day, before trying to scale animal count further.
+2 of the second caretaker's 3 animals escaped on day 13 in both attempts,
+each escape a total loss of the $400-500 purchase.
+
+**Attempt 3** fixed the actual bug (found by calling `_caretaker_action`
+directly against the exact game state, not by theorizing): the caretaker
+checked "place a new animal" *before* "feed animals I already have", so
+whenever one slot's purchase was delayed it got stuck retrying every turn
+and never got to feed the ones it already had. Reordered to
+feed-existing-first: `escaped_animals` dropped to 0 and `animal_cost`
+landed exactly at $2,600 (no replacement buys) -- but mean profit vs. v4
+got *worse* (-$4,870). With the bug gone, the real cause is now clear:
+milk+wool net profit (revenue minus feed minus purchase) was actually
+*higher* than v4's ($13,808 vs. $11,492) -- animal husbandry itself
+scales fine. The one melon tile given up to fund the second caretaker
+was worth ~$6,943 in revenue over the game, more than double what the
+extra animals net. **Melon is worth more per hand than a second
+caretaker, given animals' recurring feed cost** -- more animals only pays
+if it doesn't cost a crop tile to get them.
+
+`submissions/baseline/main.py` is unchanged (still v4);
+`submissions/candidate/main.py` holds attempt 3's (bug-fixed but still
+rejected) code for reference. `opponents/README.md`'s "Round 4" section
+has the full writeup and the next lever: give the farmer dual duty
+(crop + a couple of animals in its idle time, ~93% idle per the very
+first analysis in this file) instead of dedicating a full hand to a
+second caretaker, so animals stop costing a melon tile to acquire.
