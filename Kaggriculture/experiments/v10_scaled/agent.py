@@ -47,10 +47,11 @@ TARGET_HANDS = 14
 # rest of the game, killing all 10 crop tiles and 2 animals from neglect.
 _RAMP_PHASE1_CAP = 5
 _RAMP_PHASE2_DAY = 7
+_RAMP_RESERVE = 500
 HIRE_RAMP_PER_DAY = 2
 ANIMAL_CARETAKER_COUNT = 4
 CROP_TENDER_HAND_COUNT = TARGET_HANDS - ANIMAL_CARETAKER_COUNT  # 10 hands + farmer = 11 crop tenders
-CASH_RESERVE = 0
+CASH_RESERVE = 300  # leave breathing room so BUY_ANIMAL doesn't compete straight down to $0 against hire costs
 
 SHED_TILE = (4, 4)
 NE_SHED_TILE = (5, 4)
@@ -90,7 +91,7 @@ SELLABLE = ("WHEAT", "MELON", "CARROT", "STRAWBERRY", "TOMATO", "MILK", "WOOL", 
 _STATE = {0: {}, 1: {}}
 
 
-def _game_state(seat: int, step: int, day: int) -> dict[str, Any]:
+def _game_state(seat: int, step: int, day: int, money: float) -> dict[str, Any]:
     game = _STATE[seat]
     if step == 0 or step < game.get("last_step", -1):
         game = {
@@ -102,7 +103,16 @@ def _game_state(seat: int, step: int, day: int) -> dict[str, Any]:
     if day > game["ramp_day"]:
         game["ramp_day"] = day
         cap = TARGET_HANDS if day >= _RAMP_PHASE2_DAY else _RAMP_PHASE1_CAP
-        game["ramp_target"] = min(cap, game["ramp_target"] + HIRE_RAMP_PER_DAY)
+        # Growing the target purely on a day-based schedule caused a second
+        # collapse: hire cost is fib-scale (paid fresh every day, since
+        # hands reset nightly) and 14 animals cost ~$6,200 to fully stock,
+        # both landing in the same few days once phase 2 starts -- money
+        # crashed to ~$0 by day 11 and never recovered. Only grow the
+        # target when there's a cash cushion above `_RAMP_RESERVE`, so
+        # a tight cash week pauses the ramp instead of overspending
+        # through it.
+        if money > _RAMP_RESERVE:
+            game["ramp_target"] = min(cap, game["ramp_target"] + HIRE_RAMP_PER_DAY)
     return game
 
 
@@ -235,7 +245,7 @@ def agent(observation: Observation) -> Action:
     market_prices = (observation.get("market") or {}).get("prices", {}) or {}
     money = farm["money"]
 
-    game = _game_state(player, step, day)
+    game = _game_state(player, step, day, money)
 
     hands = farm.get("hands", [])
     unit_ids: list[Any] = ["farmer", *range(len(hands))]
@@ -276,7 +286,7 @@ def agent(observation: Observation) -> Action:
         spend = 0.0
         for i in range(wanted):
             cost = hire_cost(hires_today + i)
-            if money - spend < cost:
+            if money - spend - cost < CASH_RESERVE:
                 break
             spend += cost
             hire_orders.append(["HIRE"])
