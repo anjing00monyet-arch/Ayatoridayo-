@@ -193,3 +193,34 @@ vs. `opponents/submission_27`: deficit narrowed from ~4.0-4.1x to
 the frozen-vs-reactive comparison table, and the next levers (land
 expansion, adding a third crop alongside all-melon, more free-money
 checks like round 6's).
+
+## Round 9 (frozen-route fragility fixed; baseline unchanged)
+
+A first attempt at closing round 8's frozen-vs-reactive gap (a
+"crop-safety" pass forcing WATER/HARVEST off live board state) was a
+**regression**: re-validating over 15 seeds showed it clobbered scripted
+movement whenever an actor merely passed through an unwatered crop
+tile, with no way to resync -- mean crashed from $62,971 to $38,743 and
+every single game lost a crop (was 1-in-15). Caught before reaching
+baseline; reverted.
+
+The user then supplied a second real competitor submission
+(`opponents/submission_29`, decoded same as submission_27). Its
+weed-repair uses a bounded catch-up window (replay each one-step-earlier
+recorded action for a few turns after any DIG-and-retry) instead of a
+single retry or a board-reactive override, correctly absorbing the
+one-turn cost without permanent drift. Adopted it verbatim in
+`experiments/frozen_route/` and regenerated
+`submission_ready/main_frozen.py`: re-validated over the same 15 seeds,
+frozen now lands at $64,221 mean / $62,648 min / 0 dead crops, within
+noise of reactive v9's $64,472 / $62,089 / 0 -- the fragility is gone.
+`submissions/baseline/main.py` stays on reactive v9 regardless (no
+upside to switching); the frozen artifact is now just a correctly-working
+record instead of a known-fragile one.
+
+Also benchmarked v9 against submission_29 (3 seeds): $48,795 vs.
+$171,436, ~3.5x deficit -- essentially tied with submission_27 despite
+submission_29's more elaborate market-timing logic, reinforcing that
+land expansion (not market tricks) is likely the biggest unclaimed lever.
+`opponents/README.md`'s "Round 9" and "submission_29" sections have the
+full decode, the before/after fix numbers, and updated next levers.

@@ -33,20 +33,62 @@ reversible with the standard library) to understand its strategy:
   284 HIRE calls (a large, sustained hand roster), and 2 BUY_LAND buys
   (day ~7 and ~11, expanding to 3 of the 4 quadrants).
 
+## submission_29
+
+A second real public solution the user supplied mid-session (docstring:
+"v21 tactical-memory Kaggriculture agent"). Same base85 + zlib + JSON
+obfuscation as submission_27, not encrypted, fully decoded. Noticeably
+more sophisticated than submission_27's architecture:
+
+- **Frozen 719-step scripted route**, same idea as submission_27 --
+  62-ish crop actions, 275 HIRE calls, 13 total `BUY_ANIMAL` orders (7
+  cow, 6 sheep) across the game, max 14 concurrent hired hands.
+- **Weed repair with a bounded catch-up window** -- this is the piece
+  worth adopting outright (see "Round 9" below): a DIG-then-retry costs
+  one extra turn, which would otherwise permanently shift every later
+  scripted *relative* movement command for that actor. Instead of just
+  retrying once and letting the shift compound forever, it spends
+  `WEED_REPLAY_STEPS` (8) further turns replaying the action recorded
+  one step *earlier* than the current step, fully absorbing the one-step
+  backlog within a bounded window.
+- **Shed-capacity-aware `_safe_market`**: projects the shed forward by
+  this turn's own DROP/PLACE actions before clamping any SELL order
+  quantity to what's actually going to be available -- guards against a
+  frozen script's recorded SELL amount exceeding a different game's
+  actual inventory (which the real env would otherwise just silently
+  under-fill or reject).
+- **Opponent-exposure-scored terminal dump-sell**: on the second-to-last
+  step, sells everything left in the shed, ranked by
+  `(1 + opponent's estimated exposure to that item) * a hand-tuned "glut
+  weight" per item * current price * log(quantity)` -- i.e. prioritize
+  dumping items the opponent is *also* likely to flood (sell those first,
+  before the shared-market price craters from both sides selling at
+  once).
+- **Clone-distance-gated preemptive selling**: tracks a `_clone_distance`
+  (how similar the two farms' public tile/hand/quadrant counts are) and,
+  only when the opponent looks like a near-mirror of itself, preemptively
+  sells ahead of a precomputed per-step market-crash-hazard table
+  (`_HAZARD`, presumably fit offline from many recorded games) -- a
+  market-timing lever our own agent has nothing like yet.
+
 ## Benchmark results
 
-vs. `opponents/submission_27/main.py`, 3 seeds, 720-turn games:
+vs. `opponents/submission_27/main.py` and `opponents/submission_29/main.py`, 3 seeds, 720-turn games:
 
-| version | our final bank | submission_27 final bank | deficit |
-|---|---|---|---|
-| single-tile carrot loop (pre-session baseline) | $3,504 | $186,169 | ~53x |
-| v3: multi-unit crop scale-up (10 hands, melon/wheat) | ~$19,900-20,100 | ~$174,000-189,000 | ~9x |
-| v4: v3 + cow/sheep husbandry | ~$27,600-29,700 | ~$163,000-196,000 | ~6x |
-| v7: + farmer dual duty + sell fertilizer | ~$40,800-42,900 | ~$172,400-182,900 | ~4.0-4.5x |
-| v8: + weed-blocks-pasture fix | ~$42,600-45,100 | ~$172,400-181,100 | ~4.0-4.1x |
-| v9: + offline-search economic tuning | ~$47,700-50,600 | ~$166,700-176,200 | ~3.5x |
+| version | our final bank | submission_27 final bank | submission_29 final bank | deficit |
+|---|---|---|---|---|
+| single-tile carrot loop (pre-session baseline) | $3,504 | $186,169 | -- | ~53x |
+| v3: multi-unit crop scale-up (10 hands, melon/wheat) | ~$19,900-20,100 | ~$174,000-189,000 | -- | ~9x |
+| v4: v3 + cow/sheep husbandry | ~$27,600-29,700 | ~$163,000-196,000 | -- | ~6x |
+| v7: + farmer dual duty + sell fertilizer | ~$40,800-42,900 | ~$172,400-182,900 | -- | ~4.0-4.5x |
+| v8: + weed-blocks-pasture fix | ~$42,600-45,100 | ~$172,400-181,100 | -- | ~4.0-4.1x |
+| v9: + offline-search economic tuning | ~$47,700-50,600 | ~$166,700-176,200 | ~$167,800-177,200 | ~3.5x (both) |
 
-Each round closed the gap further but none has won yet.
+Each round closed the gap further but none has won yet. submission_29
+scores in the same range as submission_27 despite its more elaborate
+market-timing logic -- most of its edge over us is still the same
+structural gap v9 hasn't closed yet: land expansion and a much larger
+sustained hand roster (see "Remaining levers" below).
 
 1. ~~**Animal husbandry** (cow/sheep -> milk/wool)~~ -- **done in v4**:
    compounding income from one $400-500 purchase instead of paying a
@@ -280,11 +322,60 @@ script. `experiments/frozen_route/main_frozen.py`-equivalent
 (`submission_ready/main_frozen.py`) is kept for the record, clearly
 worse than `submissions/baseline/main.py`.
 
+## Round 9: fixed the frozen route's fragility (adopted from submission_29)
+
+Attempt 1 at closing Round 8's gap: extend the weed-repair layer with a
+"crop-safety" pass that forced `WATER`/`HARVEST` whenever an actor's
+*current* tile (read from the live observation, not the recording)
+needed it. Looked safe on paper -- watering an already-watered tile is a
+guaranteed no-op in the real env -- but re-validating over the same 15
+seeds it made things **dramatically worse**: mean $62,971 -> $38,743,
+dead crops 3-in-15-games -> a dead crop in **every** game. Root cause:
+the pass fired whenever an actor merely *passed through* an unwatered
+crop tile on its way somewhere else, clobbering that turn's scripted
+movement command with no way to resync -- desyncing every later
+scripted position for that actor for the rest of the game (movement is
+a sequence of relative NORTH/SOUTH/EAST/WEST steps, so one dropped move
+compounds forever). This was caught before it reached baseline; reverted.
+
+The user then supplied `opponents/submission_29`, whose own weed-repair
+handles exactly this class of bug correctly (see the submission_29
+section above): a DIG-then-retry's one-turn cost is absorbed by
+replaying `WEED_REPLAY_STEPS` further turns of the *one-step-earlier*
+recorded action, instead of either a single retry (our original,
+permanently-drifting design) or an unconditional board-reactive override
+(this round's broken attempt). Adopted it verbatim in
+`experiments/frozen_route/freeze.py` and `build_main.py`, regenerated
+`submission_ready/main_frozen.py`, and re-validated over the same 15 seeds:
+
+| | mean | min | dead crops (15 games) |
+|---|---|---|---|
+| reactive (v9) | $64,472 | $62,089 | 0 |
+| frozen (submission_29-style catch-up repair) | $64,221 | $62,648 | 0 |
+
+The fragility is gone -- frozen and reactive are now within noise of
+each other (the built-in `"random"` opponent isn't seeded reproducibly
+per call, so small seed-to-seed differences are expected even for the
+*same* policy run twice). `submissions/baseline/main.py` stays on
+reactive v9 regardless, since there's no upside left to switching and
+the frozen artifact exists only as a record of the investigation.
+
+Also benchmarked v9 against submission_29 directly (3 seeds): **v9
+$48,795 vs. submission_29 $171,436, ~3.5x deficit** -- essentially tied
+with the submission_27 deficit despite submission_29's much more
+elaborate market-timing logic (see "Benchmark results" above and
+"Remaining levers" below for what's likely actually driving the gap).
+
 ## Remaining levers (not yet tried)
 
 1. **Land expansion**, once headcount is no longer the constraint it
    looks like it should be -- every version through v9 still fits inside
    the 24-tile NW quadrant, so this hasn't been the actual bottleneck yet.
+   Both submission_27 (3 quadrants) and submission_29 (max 14 hands, so
+   presumably also expanded) go beyond one quadrant while only running a
+   comparable-or-smaller hand count than v9's target of 10 -- suggesting
+   land, not headcount, is the bigger unclaimed lever, and likely explains
+   most of the ~3.5x gap by itself, ahead of any market-timing trick.
 2. **Ongoing crops (strawberry/tomato)** and **goose/egg** for further
    income diversification -- round 8's search confirmed melon still beats
    strawberry/tomato as a *secondary* crop by a wide margin, but didn't
@@ -292,8 +383,17 @@ worse than `submissions/baseline/main.py`.
 3. Look for more "free money already being collected" gaps like round
    6's -- cheap, safe wins are worth checking for before reaching for
    riskier strategy changes.
-4. If a frozen route is still wanted despite round 8's finding, the
-   weed-repair layer would need to cover *all* the ways a live board can
-   diverge from a recording (e.g. re-deriving WATER/HARVEST/FEED targets
-   from the live board each turn instead of blindly replaying, which
-   starts to just reinvent the reactive agent).
+4. ~~If a frozen route is still wanted...~~ -- **done in round 9**: the
+   weed-repair layer now uses submission_29's bounded catch-up window and
+   measures within noise of the reactive policy. Still not the baseline
+   (no upside to switching), but no longer a fragility risk if ever needed.
+5. **submission_29-specific techniques not yet evaluated for our own
+   agent**: opponent-exposure-scored terminal dump-sell (v9 already sells
+   its entire shed every turn rather than hoarding, so a terminal-only
+   dump doesn't directly apply, but *throttling* sells based on live
+   opponent exposure might still beat always-sell-everything -- untested,
+   would need its own A/B round) and clone-distance-gated preemptive
+   selling ahead of a market-crash hazard table (would require building
+   our own hazard model from played games first; submission_29's is
+   presumably fit from its own large recorded-game corpus, which we don't
+   have an equivalent of yet).
