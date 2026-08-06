@@ -1,35 +1,28 @@
-"""Candidate v5: more animals per caretaker.
+"""Candidate v6: give the farmer dual duty instead of a second caretaker.
 
-v4 (current baseline) ran exactly 1 cow + 1 sheep via a single caretaker.
-opponents/submission_27 runs 8 cows + 2 sheep -- animal husbandry was the
-single biggest lever identified in opponents/README.md.
+Round 4 (see opponents/README.md and reports/latest_analysis.md) tried
+scaling from v4's 1 cow + 1 sheep toward submission_27's 8 cow + 2 sheep
+by reallocating 2 of the 10 hands into a second caretaker (6 animals
+total). After fixing two real bugs (a cash-flow collapse, then a
+feed-priority bug that caused animals to starve), the clean, bug-free
+result was still a net loss vs. v4: the melon tile given up to free a
+hand for the second caretaker was worth ~$6,943 over the game, more than
+double the ~$2,316 the extra animals actually netted once feed cost is
+counted. Animal husbandry itself was fine (its net profit was *higher*
+than v4's) -- the problem was paying for it with a melon tile.
 
-Two earlier attempts at this got the economics wrong, in increasingly
-specific ways (see the git log for the actual numbers from each):
-
-1. Bumped TARGET_HANDS 10 -> 18 and added land purchases, assuming more
-   hands + more animals would both help. HIRE cost is
-   `mult * fib(n_already_hired_today)`, and hands must be re-hired from
-   scratch every day (they disappear overnight) -- so the cost of a full
-   day's hiring explodes with headcount: 10 hands costs $143/day, 12
-   costs $376/day, 18 costs $6,764/day. That run never even reached the
-   caretaker slots (15-17), and $3,000 was wasted on land for tiles we
-   never needed.
-2. Kept TARGET_HANDS at a seemingly-modest 12. Still wrong: $376/day in
-   pure hire cost, sustained for the ~12 days before melon first matures
-   (little income yet, just a few wheat tiles), burns through the $3,000
-   starting bank on hiring *alone* -- before animal or seed costs are
-   even considered. Hand count collapsed unpredictably once cash ran out,
-   leaving some tiles/animals untended some days -> dead crops, escaped
-   animals, a doom spiral.
-
-This version keeps TARGET_HANDS at 10 -- the same headcount as v4, with
-the same proven $143/day hire cost -- and instead *reallocates* 2 of
-those 10 hands from crop tenants to caretakers (was 1 caretaker tending 2
-animals; now 2 caretakers tending 3 animals each, 6 total: 4 cows + 2
-sheep). Same hire bill as v4, one fewer melon tile, four more animals.
-Also adds a cash reserve so a burst of animal purchases can never eat
-into the money needed for tomorrow's hiring/feeding.
+This version doesn't reallocate anything. It restores v4's exact
+crop/hand-caretaker layout (farmer + 9 hands on crop tiles, 1 dedicated
+hand caretaker tending 1 cow + 1 sheep) and adds one more cow tended by
+the farmer itself, in the farmer's own idle time. The farmer is
+persistent (never needs the daily re-hire + re-walk-back-to-position that
+costs hands time) and, per the very first analysis in this repo, was idle
+93% of the time even with a crop tile to tend -- so a second animal here
+costs neither hire budget nor a crop tile. Each turn the farmer checks
+its crop tile first (plant/water/harvest whenever something concrete
+needs doing there) and only spends idle turns on animal care when the
+crop needs nothing this instant -- it must never let animal-tending
+travel cause it to miss its own crop's daily watering.
 
 Do not change the `agent(observation) -> action` signature or the action
 return shape -- that is the official Kaggle submission API. See
@@ -47,11 +40,8 @@ Action = dict[str, Any]
 
 TARGET_HANDS = 10
 HIRE_RAMP_PER_DAY = 3  # stagger hiring so planting/harvest timing spreads out
-NUM_CARETAKERS = 2
-ANIMALS_PER_CARETAKER = 3
-CARETAKER_HAND_INDICES = list(range(TARGET_HANDS - NUM_CARETAKERS, TARGET_HANDS))  # last N hands
+CARETAKER_HAND_INDEX = TARGET_HANDS - 1  # last hired hand tends animals, not crops
 CASH_RESERVE = 1500  # never let discretionary spend (animals) risk tomorrow's hire/feed costs
-CARETAKER_STAGGER_DAYS = 6  # extra days between successive caretaker groups going active
 
 SHED_TILE = (4, 4)  # only shed-adjacent tile guaranteed unlocked from turn 0
 
@@ -62,20 +52,21 @@ def _by_distance(tiles):
 
 _NW_TILES = _by_distance((x, y) for x in range(5) for y in range(5) if (x, y) != SHED_TILE)
 
-ANIMAL_TILES = _NW_TILES[: NUM_CARETAKERS * ANIMALS_PER_CARETAKER]
-ANIMAL_PLAN = (["COW"] * 4 + ["SHEEP"] * 2)[: len(ANIMAL_TILES)]
-# Groups: caretaker hand index -> its own slice of (tiles, animals).
-CARETAKER_GROUPS = {
-    hand_index: (
-        ANIMAL_TILES[i * ANIMALS_PER_CARETAKER : (i + 1) * ANIMALS_PER_CARETAKER],
-        ANIMAL_PLAN[i * ANIMALS_PER_CARETAKER : (i + 1) * ANIMALS_PER_CARETAKER],
-    )
-    for i, hand_index in enumerate(CARETAKER_HAND_INDICES)
-}
+HAND_ANIMAL_TILES = _NW_TILES[:2]
+HAND_ANIMAL_PLAN = ["COW", "SHEEP"]  # tended by the dedicated hand caretaker
+FARMER_ANIMAL_TILES = _NW_TILES[2:4]
+FARMER_ANIMAL_PLAN = ["COW", "SHEEP"]  # tended by the farmer itself, in its idle time
+# A 3rd animal on either the farmer (neglected its own crop -- 2 dead
+# crops, melon revenue nearly halved) or the hand caretaker (shifted every
+# crop tile 1 tile farther from the shed and lost head-to-head, -$4,482
+# mean profit) was tried and made things worse. 2+2 is this design's peak.
 
-# Crop tenants fill the remaining NW tiles (plenty -- 12 hands - 2
-# caretakers + farmer = 11 crop tenders, vs. 18 leftover NW tiles).
-CROP_TILES = _NW_TILES[len(ANIMAL_TILES) :]
+ALL_ANIMAL_TILES = HAND_ANIMAL_TILES + FARMER_ANIMAL_TILES
+ALL_ANIMAL_PLAN = HAND_ANIMAL_PLAN + FARMER_ANIMAL_PLAN
+
+# Crop tenants fill the remaining NW tiles (plenty -- 10 crop tenders vs.
+# 21 leftover NW tiles once 3 are reserved for animals).
+CROP_TILES = _NW_TILES[len(ALL_ANIMAL_TILES) :]
 # First few assigned crop units run wheat for early cash flow (also feeds
 # the animals); the rest run melon.
 CROP_PLAN = ["WHEAT"] * 4 + ["MELON"] * (len(CROP_TILES) - 4)
@@ -118,6 +109,22 @@ def _move_toward(pos: tuple[int, int], target: tuple[int, int]) -> str:
     return "SOUTH" if ty > y else "NORTH"
 
 
+def _crop_needs_attention(farm, day, target, crop) -> bool:
+    """Whether the crop tile has something concrete to do right now --
+    used by the farmer to decide crop duty vs. animal duty without first
+    forcing a move back to the tile just to check.
+    """
+    tile = farm["tiles"][target[1]][target[0]]
+    if tile is None:
+        return True  # either plant now, or register the seed shortfall
+    if isinstance(tile, dict) and tile.get("kind") == "PLANT" and tile.get("crop") == crop:
+        age = day - tile["planted_day"]
+        return age >= CROPS[crop]["max_yield_day"] or not tile.get("watered_today")
+    if isinstance(tile, dict) and tile.get("kind") == "WEED":
+        return True
+    return False
+
+
 def _crop_tile_action(farm, day, pos, target, crop, available_seeds, seed_shortfall):
     if pos != target:
         return [_move_toward(pos, target)]
@@ -141,18 +148,14 @@ def _crop_tile_action(farm, day, pos, target, crop, available_seeds, seed_shortf
 
 
 def _caretaker_action(farm, pos, unit_inventory, my_tiles, my_plan):
-    """State-driven: derives this caretaker's next move purely from current
-    tile/inventory state for its own group of animals, checked in priority
-    order. Self-correcting -- no memory of "where it was headed" needed.
+    """State-driven: derives the next move purely from current tile/
+    inventory state for this group of animals, checked in priority order.
+    Self-correcting -- no memory of "where it was headed" needed.
 
     Feeding animals *already* placed is checked before placing a *new*
-    one. An earlier version checked "place new animal" first: whenever
-    one slot's animal purchase was delayed (e.g. by the cash reserve, or
-    simply market-order timing), the caretaker got stuck every single
-    turn trying to fetch/place that pending animal and never reached the
-    daily feed loop for the animals it already had -- which starved and
-    escaped, a total loss of that purchase. See opponents/README.md's
-    "Round 4" section for the real numbers this caused.
+    one -- an earlier version got this backwards and starved animals
+    while stuck retrying a delayed purchase. See opponents/README.md's
+    "Round 4" section.
     """
     tiles = farm["tiles"]
     wheat_held = unit_inventory.get("WHEAT", 0)
@@ -235,11 +238,20 @@ def agent(observation: Observation) -> Action:
     unit_ops: list[list[Any]] = []
 
     for index, (unit_id, pos) in enumerate(zip(unit_ids, unit_positions)):
-        if unit_id in CARETAKER_GROUPS:
-            my_tiles, my_plan = CARETAKER_GROUPS[unit_id]
-            inv = inventories[index] if index < len(inventories) else {}
-            unit_ops.append(_caretaker_action(farm, pos, inv, my_tiles, my_plan))
+        inv = inventories[index] if index < len(inventories) else {}
+
+        if unit_id == "farmer":
+            target, crop = _assign_crop(game, unit_id)
+            if target is not None and _crop_needs_attention(farm, day, target, crop):
+                unit_ops.append(_crop_tile_action(farm, day, pos, target, crop, available_seeds, seed_shortfall))
+            else:
+                unit_ops.append(_caretaker_action(farm, pos, inv, FARMER_ANIMAL_TILES, FARMER_ANIMAL_PLAN))
             continue
+
+        if unit_id == CARETAKER_HAND_INDEX:
+            unit_ops.append(_caretaker_action(farm, pos, inv, HAND_ANIMAL_TILES, HAND_ANIMAL_PLAN))
+            continue
+
         target, crop = _assign_crop(game, unit_id)
         if target is None:
             unit_ops.append(["PASS"])
@@ -247,12 +259,8 @@ def agent(observation: Observation) -> Action:
         unit_ops.append(_crop_tile_action(farm, day, pos, target, crop, available_seeds, seed_shortfall))
 
     hire_orders: list[list[Any]] = []
-    # maxMarketOrdersPerTurn caps a single turn at 10 HIRE orders, so
-    # replenishing TARGET_HANDS > 10 from the overnight reset to 0 takes
-    # more than one turn -- spread it over the first few hours of the day
-    # rather than losing the excess to the [:10] truncation below.
-    if hour < 3 and len(hands) < game["ramp_target"]:
-        wanted = min(10, game["ramp_target"] - len(hands))
+    if hour == 0 and len(hands) < game["ramp_target"]:
+        wanted = game["ramp_target"] - len(hands)
         hires_today = farm.get("hires_today", 0)
         spend = 0.0
         for i in range(wanted):
@@ -262,18 +270,11 @@ def agent(observation: Observation) -> Action:
             spend += cost
             hire_orders.append(["HIRE"])
 
-    # Only spend on animals/feed for caretakers that actually exist today,
-    # AND stagger the caretaker groups a further few days apart. Bringing
-    # all of them online together piles up simultaneous purchase + daily
-    # feed costs right as hiring finishes ramping (day ~3-4), well before
-    # melon/wool/milk income exists to cover it -- an earlier version of
-    # this file measured that cash crunch starving existing animals of
-    # feed (2 consecutive unfed days -> escaped, a total loss of the
-    # purchase) and losing head-to-head to v4 as a result.
-    active_plan: list[str] = []
-    for group_index, hand_index in enumerate(CARETAKER_HAND_INDICES):
-        if hand_index < len(hands) and day >= group_index * CARETAKER_STAGGER_DAYS:
-            active_plan.extend(CARETAKER_GROUPS[hand_index][1])
+    # The hand caretaker only exists once hired; the farmer's animal is
+    # always "active" since the farmer is always present.
+    active_plan = list(FARMER_ANIMAL_PLAN)
+    if CARETAKER_HAND_INDEX < len(hands):
+        active_plan += HAND_ANIMAL_PLAN
 
     # Reserve enough wheat in the shed to feed every active animal today
     # before selling the rest; top up from the market if short.
@@ -295,12 +296,12 @@ def agent(observation: Observation) -> Action:
             buy_orders.append(["BUY_SEED", crop, affordable])
             remaining_money -= affordable * cost_each
 
-    # How many of each animal type are still needed (for active caretakers
+    # How many of each animal type are still needed (for active groups
     # only), counting ones already placed, in the shed, or carried by a unit.
     needed = Counter(active_plan)
     placed = Counter(
         tile["animal"]
-        for (tx, ty) in ANIMAL_TILES
+        for (tx, ty) in ALL_ANIMAL_TILES
         for tile in [farm["tiles"][ty][tx]]
         if isinstance(tile, dict) and tile.get("animal")
     )
@@ -313,11 +314,7 @@ def agent(observation: Observation) -> Action:
         if shortfall > 0:
             cost = ANIMALS[animal]["cost"]
             # Discretionary purchase -- never let it eat into the cash
-            # reserve that keeps tomorrow's hiring/feeding affordable. A
-            # burst of simultaneous buys once new caretakers activate is
-            # exactly what caused a cash-flow collapse (empty tiles going
-            # unwatered, animals going unfed) in an earlier version of
-            # this file -- see the git log for the numbers.
+            # reserve that keeps tomorrow's hiring/feeding affordable.
             spendable = max(0, remaining_money - CASH_RESERVE)
             affordable = min(shortfall, 1, int(spendable // cost))  # cap burst per turn
             if affordable > 0:

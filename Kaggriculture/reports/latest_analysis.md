@@ -108,8 +108,24 @@ if it doesn't cost a crop tile to get them.
 
 `submissions/baseline/main.py` is unchanged (still v4);
 `submissions/candidate/main.py` holds attempt 3's (bug-fixed but still
-rejected) code for reference. `opponents/README.md`'s "Round 4" section
-has the full writeup and the next lever: give the farmer dual duty
-(crop + a couple of animals in its idle time, ~93% idle per the very
-first analysis in this file) instead of dedicating a full hand to a
-second caretaker, so animals stop costing a melon tile to acquire.
+rejected) code for reference.
+
+## Round 5 (close, still rejected -- baseline unchanged)
+
+Acted on round 4's lever: gave the farmer dual duty (crop + animals in
+its idle time) instead of dedicating a full hand to a second caretaker,
+so animals stop costing a melon tile. Best tuning -- farmer tends 1 extra
+cow + 1 extra sheep, on top of its own crop tile and the existing hand
+caretaker's 1 cow + 1 sheep -- scored **+$4,453 mean profit, 100% win
+rate, zero crashes, zero escaped animals, zero dead crops over 20 real
+games**. The best and safest result of this entire investigation, but
+still short of the $5,000 acceptance bar -- correctly REJECTED. Adding a
+3rd animal to either the farmer (neglected its own crop, 2 dead crops) or
+the hand caretaker (pushed every crop tile 1 tile farther from the shed,
+-$4,482) made things worse, so 2+2 is this design's ceiling.
+
+vs. `opponents/submission_27`: deficit narrowed slightly further to
+~5.3-5.5x. Full numbers and the remaining levers (land expansion, ongoing
+crops, squeezing the existing tiles rather than adding more animals) are
+in `opponents/README.md`'s "Round 5" section.
+`submissions/candidate/main.py` holds this round's code.

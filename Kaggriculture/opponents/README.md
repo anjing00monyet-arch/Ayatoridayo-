@@ -125,23 +125,56 @@ extra animals net. **Melon is worth more per hand than a second
 caretaker's animals, given animals' recurring feed cost.** More animals
 only pays if it doesn't cost a crop tile to get them.
 
-`submissions/baseline/main.py` is still v4 (unchanged); this round's
-bug-fixed-but-still-rejected code is in `submissions/candidate/main.py`
-for reference, and `reports/experiment_history.csv` has all three
-attempts' numbers.
+`submissions/baseline/main.py` is still v4 (unchanged); round 4's
+bug-fixed-but-still-rejected code was superseded by round 5 below.
+
+## Round 5: farmer dual duty (close, still rejected)
+
+Tested the "give the farmer dual duty" idea from the previous version of
+this section: instead of a second *hand* caretaker (which costs a melon
+tile), the farmer -- persistent, no daily re-hire/re-walk, idle 93% of
+the time even with its own crop tile per the very first analysis in this
+repo -- also tends 1-2 animals in its idle time. Priority per turn: crop
+action if the crop tile needs something concrete right now (plant/water/
+harvest), animal care otherwise. This costs neither a hire slot nor a
+crop tile.
+
+Tuning (each measured over 10-20 real games against v4):
+
+- Farmer + 1 extra cow: **+$1,987 mean profit, 100% win rate** -- real,
+  consistent, but nowhere near the $5,000 bar.
+- Farmer + 2 animals (cow + sheep): **+$4,017 mean profit (10 games),
+  +$4,453 (20 games), 100% win rate both times, zero crashes, zero
+  escaped animals, zero dead crops.** Best result of the whole
+  investigation -- still short of $5,000, correctly REJECTED.
+- Farmer + 3 animals: made the farmer neglect its own crop (2 dead crops,
+  melon revenue nearly halved) -- 2 is this design's ceiling.
+- Hand caretaker + a 3rd animal instead (no crop to neglect, so seemed
+  safer): shifted every crop tile 1 tile farther from the shed and lost
+  head-to-head, -$4,482 mean profit. The 2 dedicated-hand-caretaker
+  animals from v4 were also already near that role's ceiling.
+- Loosening the $1,500 cash reserve to $1,000: worse, not better
+  (+$3,538 over 15 games) -- $1,500 stands.
+
+**Status**: farmer + 2 animals (cow + sheep) is a real, safe, consistently
+positive improvement (100% win rate across every sample taken) that the
+acceptance gate correctly rejects for falling short of the $5,000 bar --
+this is the gate working as designed, not a flaw. vs.
+`opponents/submission_27`: deficit narrowed slightly further, to ~5.3-5.5x
+(~$32,500-34,800 vs. ~$175,000-185,000 across 3 seeds), continuing the
+per-round progression 53x -> 9x -> 6x -> ~5.4x.
+`submissions/candidate/main.py` holds this round's code; all seven
+attempts across rounds 4-5 are logged in `reports/experiment_history.csv`.
 
 ## Remaining levers (not yet tried)
 
-1. **Give the farmer dual duty** instead of dedicating a full hand to a
-   second caretaker: the farmer is persistent (no daily re-hire/re-walk)
-   and, per the very first analysis in this repo, idle 93% of the time.
-   Having it handle a couple of animals *in addition to* its own crop
-   tile -- crop action when the crop needs something concrete, animal
-   care otherwise -- would add animals without sacrificing hire budget
-   or a melon tile. Needs care: the farmer must never let animal-tending
-   travel cause it to miss its own crop's daily watering.
-2. **Land expansion**, once headcount is no longer the constraint it
-   looks like it should be -- v3/v4/v5 all still fit inside the 24-tile
-   NW quadrant, so this hasn't been the actual bottleneck yet.
-3. **Ongoing crops (strawberry/tomato)** and **goose/egg** for further
+1. **Land expansion**, once headcount is no longer the constraint it
+   looks like it should be -- every version through v6 still fits inside
+   the 24-tile NW quadrant, so this hasn't been the actual bottleneck yet.
+2. **Ongoing crops (strawberry/tomato)** and **goose/egg** for further
    income diversification, matching submission_27's mix.
+3. **A second, independent path to close the last $500-1,500** of round
+   5's gap to the acceptance bar -- e.g. give the *hand* caretaker its own
+   idle-time boost via CARE/COLLECT_FERTILIZER timing, or squeeze more
+   melon cycles out of the existing crop tiles -- rather than adding more
+   animals, which this round found saturates fast.
