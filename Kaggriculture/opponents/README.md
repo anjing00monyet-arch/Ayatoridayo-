@@ -44,6 +44,7 @@ vs. `opponents/submission_27/main.py`, 3 seeds, 720-turn games:
 | v4: v3 + cow/sheep husbandry | ~$27,600-29,700 | ~$163,000-196,000 | ~6x |
 | v7: + farmer dual duty + sell fertilizer | ~$40,800-42,900 | ~$172,400-182,900 | ~4.0-4.5x |
 | v8: + weed-blocks-pasture fix | ~$42,600-45,100 | ~$172,400-181,100 | ~4.0-4.1x |
+| v9: + offline-search economic tuning | ~$47,700-50,600 | ~$166,700-176,200 | ~3.5x |
 
 Each round closed the gap further but none has won yet.
 
@@ -210,13 +211,89 @@ vs. `opponents/submission_27`: ~4.0-4.1x deficit, consistent with v7
 (the fix's benefit is real but rare, so it barely moves the 3-seed
 average).
 
+## Round 8: offline search for a frozen route (found a better policy; froze it anyway -- worse)
+
+The user asked for a submission_27-style frozen 720-step action script,
+specifically built via **actual offline search** for a stronger sequence
+rather than just recording v8's existing reactive trajectory (freezing
+an already-reactive policy loses its adaptability for no performance
+gain -- flagged this trade-off before starting, per this file's own
+"single-tile carrot loop" lesson about robustness).
+
+**Search infrastructure** (`experiments/frozen_route/`):
+`parametrized_agent.py` generalizes v8's hard-coded constants
+(`TARGET_HANDS`, wheat/melon tile split, hire ramp, cash reserve, animal
+counts per caretaker, secondary crop) into a `Params` dataclass + factory,
+verified byte-identical to v8 at default parameters (ties exactly against
+v8 head-to-head, matches on 3 seeds vs the deterministic `"starter"`
+opponent). `search.py` evaluates hand-picked variants -- not blind/random
+search, since every axis was chosen from a specific open question this
+session's manual tuning left unanswered -- over a fixed seed set for
+paired comparison.
+
+**4 rounds, narrowing from $53,221 (v8) to $64,595 mean** (5 seeds each
+unless noted):
+
+1. Single-axis sweep (16 variants): `wheat_tiles=2` (down from v8's 4) was
+   the standout, $57,372. Confirmed melon beats strawberry/tomato as
+   secondary crop by a wide margin, and that removing either caretaker's
+   animal duty hurts a lot -- v8's other choices were already good.
+2. Combined `wheat_tiles` with the other individually-positive axes
+   (`cash_reserve`, `target_hands`, `hire_ramp_per_day`): `wheat_tiles=1,
+   cash_reserve=1000` won at $60,203; stacking `target_hands=11` and
+   `hire_ramp_per_day=4` on top made it *worse* ($56,977-59,142) --
+   diminishing/negative interaction, single-axis winners don't just stack.
+3. Fine-tuned the reserve: $500 beat $1000 ($62,416), with `wheat_tiles=0`
+   and `wheat_tiles=1` now essentially tied.
+4. Pushed the reserve to $0 and confirmed `wheat_tiles=0`: **$64,595**,
+   with `wheat_tiles=0` beating `wheat_tiles=1` on a 12-seed tie-break
+   ($62,597 vs $61,783 at reserve=500). Validated the winner over 15 solo
+   seeds (mean $64,749, min $63,172, zero crashes/dead-crops/escapes) and
+   head-to-head against v8 (15 real games: **+$12,311 mean profit, 100%
+   win rate, zero crashes -- cleared the acceptance gate, promoted as
+   v9**).
+
+**Then froze it -- and it got worse.** Recorded the winning policy's
+actual decisions for one game (`experiments/frozen_route/freeze.py`,
+via `game.kaggriculture_env.decision_pairs` so each action is paired with
+the observation that produced it) and replayed them with a
+submission_27-style weed-repair layer (dig-and-retry when a scripted
+PLANT/BUILD_PASTURE lands on a weed the recording didn't have). Compared
+head-to-head against the same policy run reactively, both on the same 15
+seeds:
+
+| | mean | min | dead crops (15 games) |
+|---|---|---|---|
+| reactive (v9) | $64,749 | $63,172 | 0 |
+| frozen (recorded + weed-repair) | $62,949 | **$43,099** | 3 |
+
+One seed in 15 cratered because weed-repair only covers the one specific
+failure mode submission_27's code handles (a scripted PLANT/BUILD landing
+on a weed) -- it doesn't cover other ways a different game's random
+weed spawns can desync an *already-planted* crop's watering schedule from
+what the recording assumed. The reactive policy has no such gap: it reads
+the real board every turn, so it's correct by construction regardless of
+what randomness did. **Conclusion: the search was worth doing (found a
+real, validated +23% improvement), freezing its output was not** --
+deployed the winning parameters reactively as v9 instead of the frozen
+script. `experiments/frozen_route/main_frozen.py`-equivalent
+(`submission_ready/main_frozen.py`) is kept for the record, clearly
+worse than `submissions/baseline/main.py`.
+
 ## Remaining levers (not yet tried)
 
 1. **Land expansion**, once headcount is no longer the constraint it
-   looks like it should be -- every version through v8 still fits inside
+   looks like it should be -- every version through v9 still fits inside
    the 24-tile NW quadrant, so this hasn't been the actual bottleneck yet.
 2. **Ongoing crops (strawberry/tomato)** and **goose/egg** for further
-   income diversification, matching submission_27's mix.
+   income diversification -- round 8's search confirmed melon still beats
+   strawberry/tomato as a *secondary* crop by a wide margin, but didn't
+   test adding them as a *third* crop alongside all-melon.
 3. Look for more "free money already being collected" gaps like round
    6's -- cheap, safe wins are worth checking for before reaching for
    riskier strategy changes.
+4. If a frozen route is still wanted despite round 8's finding, the
+   weed-repair layer would need to cover *all* the ways a live board can
+   diverge from a recording (e.g. re-deriving WATER/HARVEST/FEED targets
+   from the live board each turn instead of blindly replaying, which
+   starts to just reinvent the reactive agent).

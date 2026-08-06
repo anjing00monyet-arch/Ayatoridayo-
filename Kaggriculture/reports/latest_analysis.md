@@ -161,6 +161,35 @@ gate said, not of promotion decisions.
 
 vs. `opponents/submission_27`: ~4.0-4.1x deficit, essentially unchanged
 from v7 since the fix's benefit is real but rare.
-`opponents/README.md`'s "Round 6" and "Round 7" sections have the full
-writeup and the next levers (land expansion, ongoing crops, more
-free-money checks like round 6's).
+
+## Round 8 (accepted, promoted to baseline as v9)
+
+User asked for a submission_27-style frozen action script, built via
+actual offline search rather than freezing v8's existing trajectory.
+Generalized v8 into a `Params`-driven agent
+(`experiments/frozen_route/parametrized_agent.py`, verified
+byte-identical to v8 at defaults) and ran 4 rounds of search over wheat
+tile count, cash reserve, hire ramp, target hand count, and secondary
+crop. Winner: `wheat_tiles=0` (all-melon crop tiles) + `cash_reserve=0`,
+$64,595 mean over 5 seeds vs. v8's $53,221 -- validated over 15 solo
+seeds (mean $64,749, zero crashes/dead-crops/escapes) and head-to-head
+against v8 (**+$12,311 mean profit, 100% win rate, zero crashes --
+ACCEPTED**), promoted as v9.
+
+Then froze the winning policy's actual decisions into a fixed action
+list with a submission_27-style weed-repair layer, as originally
+requested -- and it measured *worse*: mean $62,949 vs. the same policy
+run reactively at $64,749, with one seed in 15 cratering to $43,099 (3
+dead crops) because weed-repair only covers a scripted PLANT/BUILD
+landing on a weed, not the other ways a different game's random weed
+spawns can desync an already-planted crop's watering from what the
+recording assumed. Deployed the winning parameters reactively as v9
+instead of the frozen script, which is kept for the record
+(`submission_ready/main_frozen.py`) but is not the baseline.
+
+vs. `opponents/submission_27`: deficit narrowed from ~4.0-4.1x to
+**~3.5x** (~$47,700-50,600 vs. ~$166,700-176,200 across 3 seeds).
+`opponents/README.md`'s "Round 8" section has the full search numbers,
+the frozen-vs-reactive comparison table, and the next levers (land
+expansion, adding a third crop alongside all-melon, more free-money
+checks like round 6's).
