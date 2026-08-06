@@ -51,6 +51,16 @@ _RAMP_RESERVE = 500
 HIRE_RAMP_PER_DAY = 2
 ANIMAL_CARETAKER_COUNT = 4
 CROP_TENDER_HAND_COUNT = TARGET_HANDS - ANIMAL_CARETAKER_COUNT  # 10 hands + farmer = 11 crop tenders
+# Caretakers are hand indices 0..3 -- hired *first*, not last -- so they
+# exist reliably even on a day the ramp can only afford a handful of
+# hands. An earlier version put them at indices 10..13 (the *last* 4
+# hired): whenever the money-gated ramp couldn't reach 10+ hands that
+# day (common -- money fluctuates around the threshold), those slots
+# didn't exist at all, animals got zero care, and up to 17 escaped
+# (more than the 14 ever bought, i.e. bought, escaped, and rebought
+# repeatedly) over a single game. Crop tenders take whatever's left
+# instead, since a few untended crop tiles is a much smaller loss than
+# a chronic animal-escape cycle.
 CASH_RESERVE = 300  # discretionary-purchase-only reserve (BUY_ANIMAL); deliberately not applied to hiring
 
 SHED_TILE = (4, 4)
@@ -84,7 +94,7 @@ for _group in _ANIMAL_GROUPS:
 
 ALL_ANIMAL_TILES = [t for group in CARETAKER_ANIMAL_TILES for t in group]
 ALL_ANIMAL_PLAN = [a for group in CARETAKER_ANIMAL_PLANS for a in group]
-CARETAKER_HAND_INDICES = list(range(CROP_TENDER_HAND_COUNT, TARGET_HANDS))  # last 4 hired hands
+CARETAKER_HAND_INDICES = list(range(ANIMAL_CARETAKER_COUNT))  # first 4 hired hands, not the last 4 -- see below
 
 SELLABLE = ("WHEAT", "MELON", "CARROT", "STRAWBERRY", "TOMATO", "MILK", "WOOL", "FERTILIZER")
 
@@ -267,9 +277,8 @@ def agent(observation: Observation) -> Action:
             continue
 
         if unit_id in CARETAKER_HAND_INDICES:
-            group = unit_id - CROP_TENDER_HAND_COUNT
             unit_ops.append(
-                _caretaker_action(farm, pos, inv, CARETAKER_ANIMAL_TILES[group], CARETAKER_ANIMAL_PLANS[group])
+                _caretaker_action(farm, pos, inv, CARETAKER_ANIMAL_TILES[unit_id], CARETAKER_ANIMAL_PLANS[unit_id])
             )
             continue
 
