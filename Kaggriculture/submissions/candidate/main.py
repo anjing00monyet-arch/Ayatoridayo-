@@ -190,16 +190,27 @@ _ACTIONS = json.loads(zlib.decompress(base64.b85decode(
 )).decode("utf-8"))
 
 
+# Delay-only offsets. A *negative* shift tries to sell before the
+# recorded harvest/collection that produces the item has necessarily
+# happened yet -- `_safe_market` clamps the moved order to whatever's
+# actually in the shed that early (often ~0), and since the order was
+# removed from its original (safe) turn entirely, that quantity is lost
+# for good rather than merely mistimed. Confirmed by measurement: an
+# earlier version mixing negative and positive offsets collapsed mean
+# profit from $173,185 (unmodified) to $35,113 in a mirror match. Delaying
+# is always safe -- the item is still sitting in the shed later, since
+# nothing about this shift touches the farm-side actions that produce or
+# consume it -- so every offset here is >= 0.
 _SELL_SHIFT = {
-    "WHEAT": -2,
-    "FERTILIZER": 3,
-    "MILK": -1,
-    "WOOL": 2,
-    "MELON": -3,
-    "STRAWBERRY": 1,
-    "TOMATO": -1,
-    "CARROT": 2,
-    "EGG": -2,
+    "WHEAT": 2,
+    "FERTILIZER": 5,
+    "MILK": 1,
+    "WOOL": 4,
+    "MELON": 3,
+    "STRAWBERRY": 2,
+    "TOMATO": 4,
+    "CARROT": 1,
+    "EGG": 3,
 }
 
 
