@@ -51,8 +51,7 @@ _RAMP_RESERVE = 500
 HIRE_RAMP_PER_DAY = 2
 ANIMAL_CARETAKER_COUNT = 4
 CROP_TENDER_HAND_COUNT = TARGET_HANDS - ANIMAL_CARETAKER_COUNT  # 10 hands + farmer = 11 crop tenders
-CASH_RESERVE = 300  # leave breathing room so BUY_ANIMAL doesn't compete straight down to $0 against hire costs
-_MIN_HANDS = 2  # never let the cash reserve block hiring down to zero hands -- see the hire_orders comment below
+CASH_RESERVE = 300  # discretionary-purchase-only reserve (BUY_ANIMAL); deliberately not applied to hiring
 
 SHED_TILE = (4, 4)
 NE_SHED_TILE = (5, 4)
@@ -282,25 +281,26 @@ def agent(observation: Observation) -> Action:
 
     hire_orders: list[list[Any]] = []
     if hour < 3 and len(hands) < game["ramp_target"]:
+        # No CASH_RESERVE here at all, unlike BUY_ANIMAL below -- v9 (the
+        # smaller-scale ancestor of this agent) hired unreserved and never
+        # had a hiring-deadlock problem. Adding a reserve here caused two
+        # different collapses in a row: at $300 it produced a hard
+        # zero-hands deadlock (money sat at exactly $298 with 0 hands
+        # hired for two full days, and every hand-tended crop tile died at
+        # once from the resulting neglect); exempting only the first 2
+        # hires from the reserve just moved the same trap down to a
+        # low-hand plateau (2-3 hands can't generate enough revenue to
+        # ever climb back above the reserve, so growth stayed stuck there
+        # too). Hiring is cheap early (fib-cost 1, 1, 2, 3, ...) and
+        # `game["ramp_target"]` (money-gated separately, see
+        # `_game_state`) already throttles how far this grows -- that's
+        # the right place to be conservative, not here.
         wanted = game["ramp_target"] - len(hands)
         hires_today = farm.get("hires_today", 0)
         spend = 0.0
         for i in range(wanted):
             cost = hire_cost(hires_today + i)
-            # The reserve must never block the first `_MIN_HANDS` hires:
-            # zero hands means zero crop/animal tending at all, which is a
-            # permanent, unrecoverable deadlock (no production -> no
-            # revenue -> money never climbs back above the reserve ->
-            # never hires again). Measured directly: money sat at exactly
-            # $298 (just under a $300 reserve) for two full days with 0
-            # hands hired, and every crop tile hand-tended up to that
-            # point died simultaneously from neglect. Cheap early hires
-            # (fib-cost 1, 1, 2, ...) are worth spending down to $0 for;
-            # the reserve only makes sense for the pricier, discretionary
-            # tail of the ramp.
-            will_have = len(hands) + len(hire_orders)
-            reserve = 0 if will_have < _MIN_HANDS else CASH_RESERVE
-            if money - spend - cost < reserve:
+            if money - spend < cost:
                 break
             spend += cost
             hire_orders.append(["HIRE"])
