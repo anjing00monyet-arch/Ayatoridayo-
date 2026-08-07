@@ -544,6 +544,82 @@ accounts for most of the remaining gap. `submissions/candidate/main.py`
 is unchanged (submission_29 + `_purchase_retry`); `experiments/v10_scaled/`
 is kept as a validated research artifact, not promoted.
 
+## Round 13: submission_30 decoded and adopted as the new base
+
+The user supplied a third real public solution, `opponents/submission_30`
+(docstring: "v22 price-impact route agent"). Same frozen-719-step-script +
+weed-repair architecture as submission_29, but a different market-order
+defense: instead of mirror detection and preemptive selling, it computes a
+per-order `_impact_score` (quantity x how much the item's price would drop
+by a later slot) and *reorders* (never resizes) its own SELL orders by
+descending impact, so high-value sells survive the `maxMarketOrdersPerTurn`
+truncation cap ahead of low-value ones. Decoded stats: 719 actions, 277
+HIRE, 2 BUY_LAND, max 14 hands, seeds {WHEAT: 92, MELON: 24,
+STRAWBERRY: 42}, animals {SHEEP: 6, COW: 8}, and (unlike submission_29's 10
+such turns) zero turns actually exceed the 10-order cap -- so
+`_impact_slots` is mostly dormant insurance, not an active edge.
+
+Benchmarked head-to-head against submission_29 (10 seeds): submission_30
+wins by ~13.6%, a real, resource-allocation-driven gap (its WHEAT volume
+alone is 92 vs. submission_29's 67) rather than a market-timing trick.
+The user chose to rebase directly onto it: `submissions/baseline/main.py`
+and `submissions/candidate/main.py` were both replaced with submission_30
+verbatim, then `_purchase_retry` (round 11's hardening fix) was ported
+onto the new base.
+
+Porting `_purchase_retry` surfaced two new bugs, neither triggered by
+submission_29's structure:
+
+1. **Order-reordering bug.** The submission_29-era implementation
+   partitioned a turn's market list into "passthrough" and "retried"
+   orders and reconcatenated them (retried orders appended after
+   passthrough). Against submission_30's order patterns this silently
+   changed execution order relative to interleaved SELL/BUY_PRODUCT
+   entries -- e.g. baseline turn 48's `[SELL FERTILIZER 2, HIRE x4,
+   BUY_PRODUCT WHEAT 3]` came out as `[SELL FERTILIZER 2, BUY_PRODUCT
+   WHEAT 3, HIRE x4]`. Since `_process_market` executes a turn's orders
+   strictly in list order with live sequential money tracking, this is a
+   real behavior change, not cosmetic: measured a ~26% mirror-match loss
+   (mean $108,479 vs. baseline $146,324, 10 seeds). Fixed by rewriting
+   `_purchase_retry` to walk the original order list **in place** --
+   each entry is replaced/reduced/dropped at its own position; only a
+   *previous* turn's carried-over shortfall gets appended at the end.
+   This alone only partially recovered the loss (mean $104,461 vs.
+   $143,506, still ~27% down).
+
+2. **Same-turn cash-flow bug.** Re-diffing after fix 1 found a second,
+   distinct issue: at step 72, `BUY_ANIMAL COW 1` (last in an 8-order
+   turn, nowhere near the 10-cap) was silently dropped because
+   `_purchase_retry`'s money check started from the turn's *opening*
+   `farm.money` and never added the same turn's earlier `SELL FERTILIZER
+   4` revenue (or subtracted `BUY_PRODUCT WHEAT 4`'s cost) as it walked
+   past them -- so by the time it reached the animal purchase it wrongly
+   believed money was short. Fixed by adding a `_current_price(obs,
+   item)` helper (reusing submission_30's own `_market_price` pricing
+   formula) and updating the running money estimate with live SELL/
+   BUY_PRODUCT effects while walking the list, mirroring how the real
+   engine tracks money sequentially within a turn.
+
+With both fixes in place, `_purchase_retry` becomes a true no-op against
+submission_30's own schedule (it never actually needs to retry anything):
+mirror match against unmodified submission_30, 10 seeds, **exact tie on
+every single seed** (delta = +0, not just within noise -- identical to the
+unit), mean $118,023 both sides. Solo vs. "random" stayed healthy at mean
+$198,926 (5 seeds), confirming no regression. This is the strongest
+possible validation for a hardening fix: byte-for-byte-equivalent outcomes
+whenever nothing actually needs retrying, with the retry logic itself only
+kicking in for the rare case (an unpredictable real opponent) it exists for.
+
+`submissions/candidate/main.py` now holds submission_30 + `_purchase_retry`.
+`submissions/baseline/main.py` is submission_30 verbatim, replacing the
+submission_29-verbatim baseline from round 10.
+
+As a final check, benchmarked the new candidate head-to-head against
+submission_29 (10 seeds, not just 5): candidate wins every single seed,
+mean **+$16,074** (candidate $137,624 vs. submission_29 $121,550, ~13.2%),
+confirming the round 10->13 rebase is a clean, consistent improvement over
+staying on submission_29.
+
 ## Remaining levers (not yet tried)
 
 1. **Land expansion**, once headcount is no longer the constraint it

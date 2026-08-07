@@ -313,3 +313,48 @@ together. `submissions/candidate/main.py` stays unchanged
 a validated research artifact. `opponents/README.md`'s "Round 12" section
 has the full trace and adds crop diversification to "Remaining levers"
 as the most likely next step for that agent, if revisited.
+
+## Round 13 (submission_30 decoded and adopted as the new base; candidate rebased with a validated perfect-tie hardening fix)
+
+User supplied a third real public solution, `opponents/submission_30`
+("v22 price-impact route agent") -- same frozen-script + weed-repair
+architecture as submission_29, but reorders (never resizes) its own SELL
+orders by a computed `_impact_score` instead of using mirror detection and
+preemptive selling. Benchmarked head-to-head vs. submission_29 (10 seeds):
+submission_30 wins by ~13.6%, a real resource-allocation gap (its WHEAT
+volume alone is 92 vs. submission_29's 67), not a market-timing trick. The
+user chose to rebase directly onto it: both `submissions/baseline/main.py`
+and `submissions/candidate/main.py` were replaced with submission_30
+verbatim, then round 11's `_purchase_retry` was ported onto the new base.
+
+Porting surfaced two new bugs, neither triggered by submission_29's own
+order patterns:
+
+1. **Order-reordering bug** -- the old implementation partitioned a
+   turn's market list into passthrough/retried and reconcatenated them,
+   silently changing execution order relative to interleaved SELL/
+   BUY_PRODUCT entries (e.g. `[SELL, HIRE x4, BUY_PRODUCT]` came out as
+   `[SELL, BUY_PRODUCT, HIRE x4]`). Since the real engine executes a
+   turn's orders in list order with live sequential money tracking, this
+   was a real ~26% mirror-match loss (mean $108,479 vs. $146,324, 10
+   seeds). Fixed by walking the original list strictly **in place**
+   instead of reordering it.
+2. **Same-turn cash-flow bug** -- after fix 1, a `BUY_ANIMAL COW 1` order
+   (last in an 8-order turn, nowhere near the 10-cap) was still being
+   silently dropped because the money check never added/subtracted the
+   same turn's own earlier SELL/BUY_PRODUCT cash effects while walking
+   past them. Fixed by tracking live SELL/BUY_PRODUCT cash flow
+   in-line (via a `_current_price` helper reusing submission_30's own
+   pricing formula), matching how the real engine tracks money
+   sequentially within a turn.
+
+With both fixes, `_purchase_retry` is a true no-op against submission_30's
+own schedule: mirror match vs. unmodified submission_30, 10 seeds, **exact
+tie on every single seed** (delta = +0, mean $118,023 both sides). Solo
+vs. "random" stayed healthy (mean $198,926, 5 seeds) -- no regression.
+Final check, candidate vs. submission_29 (10 seeds): wins every seed, mean
+**+$16,074** (candidate $137,624 vs. $121,550, ~13.2%), confirming the
+rebase is a clean, consistent improvement. `submissions/candidate/main.py`
+now holds submission_30 + `_purchase_retry`; `submissions/baseline/main.py`
+is submission_30 verbatim. Full trace in `opponents/README.md`'s "Round 13"
+section.
