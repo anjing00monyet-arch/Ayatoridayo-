@@ -279,3 +279,37 @@ bug fix, whether to manually promote a zero-average, zero-downside
 hardening fix is left to the user -- `opponents/README.md`'s "Round 11"
 section has the full trace and the updated "Remaining levers" (land
 expansion is still the best-supported unclaimed lever).
+
+## Round 12 (real #1-player logs analyzed; scaled reactive rebuild stabilized but not competitive; baseline unchanged)
+
+User supplied 5 real Kaggle episode replays featuring "Konstantin03" (the
+account in all 5, taken as the current #1 leaderboard player). Both
+submission_29 and Konstantin03 independently converge on the same scale
+(14 hands, 8 cow + 6 sheep, exactly 2 land purchases, never the 3rd/
+priciest quadrant) -- fib-cost math confirms staffing that unclaimed
+quadrant would cost $334,480/20 days for 6 more hands, far more than a
+few melon tiles could earn back, so round 9's "unclaimed land" lever was
+likely a correct non-choice all along, not an oversight. Konstantin03's
+own 5 logs are also byte-identical only through day ~7, then diverge on
+~94% of remaining turns depending on the opponent -- a genuinely
+reactive, state-driven design (this project's own v3-v9 lineage) grafted
+onto a frozen bootstrap, not a pure frozen script like submission_29.
+
+Rebuilt v9's reactive architecture at this validated scale in
+`experiments/v10_scaled/`. Manual single-seed tuning of the cash-flow
+knobs took 7 rounds (each fixing one collapse: ramp too fast, a cash
+reserve deadlocking at zero hands, the same trap at a low plateau,
+unreliable caretaker hand indices, a ramp threshold too conservative then
+too aggressive) without ever converging -- switched to round 8's
+multi-seed search methodology instead and found a stable combination
+(10 seeds: zero escaped animals, zero dead crops, mean $38,278, worst
+case $36,807, vs. the best single-seed guess's mean $20,236/worst case $1).
+
+**Matching scale wasn't enough**: head-to-head vs. submission_29, v10
+scores $25,471 vs. $173,622 (~6.8x deficit) -- stable now, but v10 only
+grows melon while both strong strategies run melon+wheat+strawberry
+together. `submissions/candidate/main.py` stays unchanged
+(submission_29 + `_purchase_retry`); `experiments/v10_scaled/` is kept as
+a validated research artifact. `opponents/README.md`'s "Round 12" section
+has the full trace and adds crop diversification to "Remaining levers"
+as the most likely next step for that agent, if revisited.

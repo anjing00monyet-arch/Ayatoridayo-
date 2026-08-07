@@ -471,6 +471,79 @@ round 7's non-negative bug fix, whether to promote a zero-average,
 zero-downside hardening fix without a further round is the user's call,
 not something to do unilaterally.
 
+## Round 12: real #1-player match logs, and a scaled-up reactive rebuild attempt
+
+The user supplied 5 real Kaggle episode replays (standard `kaggle_environments`
+JSON, directly compatible with `game/kaggriculture_env.py`) featuring
+"Konstantin03", the account appearing in all 5 -- taken as the current #1
+leaderboard player. Decoding them turned up two findings:
+
+1. **Both submission_29 and Konstantin03 independently converge on the
+   same scale**: max 14 hands, ~275 HIRE calls, exactly 2 BUY_LAND
+   purchases (NE + SW, never the 3rd/priciest SE quadrant), 8 cow + 6
+   sheep. Computing the fib-cost hiring math confirms *why*: hiring 6
+   more hands beyond 14 (to staff the unclaimed SE quadrant) costs
+   $334,480 over 20 days in HIRE fees alone -- far more than a handful of
+   melon tiles could ever earn back. The unclaimed 4th quadrant flagged as
+   a "remaining lever" in round 9 is very likely a deliberate, correct
+   non-choice, not an oversight, in both strategies.
+2. **Konstantin03's own 5 logs are byte-identical to each other only
+   through step ~169** (day ~7) -- after that, ~94% of turns differ
+   depending on the opponent, traced to something as small as one extra
+   HIRE call on one specific turn (money-dependent) cascading into a
+   different hand count and therefore different tile assignments for the
+   rest of the game. This is a genuinely reactive, state-driven design
+   (much closer to this project's own v3-v9 lineage) grafted onto a
+   frozen early-game bootstrap -- not a pure frozen 719-step script like
+   submission_29.
+
+Given (2), grafting Konstantin03's specific moves onto submission_29's
+frozen script isn't possible (there is no single fixed action list to
+extract past day 7) and wouldn't be safe anyway (rounds 9/11 already
+found frozen-script grafts fragile to small perturbations). Instead,
+rebuilt v9's reactive architecture at the validated scale (14 hands, 8
+cow + 6 sheep, land expansion into NE) in `experiments/v10_scaled/`.
+
+Manually tuning the new scale's cash-flow knobs against one seed at a
+time took 7 rounds, each fixing a different collapse in turn: a ramp
+reaching 14 hands by day 2 (before any crop or animal could possibly
+have matured enough to pay the $986/day fib-scale hire cost) crashed
+money to ~$0 by day 3 and killed every crop tile from neglect; a $300
+cash reserve applied to hiring deadlocked at exactly $298 with zero hands
+for two full days (same mass-neglect failure); exempting the first 2
+hires from that reserve just moved the same trap to a low 2-3-hand
+plateau; putting the 4 animal caretakers at hand indices 10-13 (the
+*last* hired) meant they didn't exist at all on any day the ramp
+couldn't reach 10 hands, so animals went uncared-for and up to 17
+escaped (more than the 14 ever bought); moving caretakers to indices
+0-3 (hired *first*) fixed that; the $500 ramp-growth threshold left the
+economy under $200 for the first 20 days; lowering it to $150 fixed that
+but reintroduced seed-dependent collapses in 3 of 5 seeds. This
+one-seed-at-a-time pattern doesn't converge -- each fix traded one
+failure mode for another.
+
+Switched to the same multi-seed search methodology as round 8
+(`experiments/v10_scaled/parametrized_agent.py` + `search*.py`, 10 seeds
+per candidate, 3 rounds) instead of continuing to guess. Found a stable
+combination -- `hire_ramp_per_day=4`, `ramp_phase1_cap=7`,
+`cash_reserve=500` (searched; $700 regressed badly to mean $26,303/min
+$13,633/34 escaped animals, confirming $500 is a real optimum, not
+"higher is safer") -- that is stable across all 10 seeds tested: zero
+escaped animals, zero dead crops, mean $38,278, worst case $36,807 (vs.
+round 1's best manual guess: mean $20,236, worst case as low as $1).
+
+**But matching the scale doesn't close the gap.** Head-to-head against
+submission_29 (5 seeds): v10 $25,471 vs. submission_29 $173,622, still a
+~6.8x deficit -- much better than the collapse-era numbers, but nowhere
+near competitive. v10 only grows melon as its single crop; both
+submission_29 and Konstantin03 run melon + wheat + strawberry together.
+Matching *headcount and animal count* was necessary to get a stable
+economy at all, but clearly isn't sufficient by itself -- execution
+sophistication (crop diversification, tile layout, market timing) still
+accounts for most of the remaining gap. `submissions/candidate/main.py`
+is unchanged (submission_29 + `_purchase_retry`); `experiments/v10_scaled/`
+is kept as a validated research artifact, not promoted.
+
 ## Remaining levers (not yet tried)
 
 1. **Land expansion**, once headcount is no longer the constraint it
@@ -502,3 +575,11 @@ not something to do unilaterally.
    our own hazard model from played games first; submission_29's is
    presumably fit from its own large recorded-game corpus, which we don't
    have an equivalent of yet).
+6. **Crop diversification for `experiments/v10_scaled`** -- round 12 found
+   a stable 14-hand/8cow+6sheep reactive economy but it still only grows
+   melon; both submission_29 and Konstantin03's real logs run melon +
+   wheat + strawberry together and substantially outscore it ($173,622
+   vs. $25,471 head-to-head). Adding the other two crops (with their own
+   multi-seed search over the mix, following the round 12 methodology
+   rather than guessing) is the most likely next lever for that agent if
+   it's ever revisited -- not attempted this round.
