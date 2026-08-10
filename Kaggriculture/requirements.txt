@@ -1,0 +1,7 @@
+# Required: the real Kaggriculture game environment.
+kaggle-environments>=1.32
+
+# Optional: enables agents/llm_client.py's unattended API mode.
+# Without this installed (and ANTHROPIC_API_KEY set), the loop runs in
+# manual mode and writes prompts to reports/pending_prompts/ instead.
+anthropic>=0.40
